@@ -16,6 +16,7 @@ import {
   EXPLORER_BASE,
   LAST_CONTRACT_KEY,
 } from './lib/config'
+import { normalizeError } from './lib/errors'
 
 type Mode = 'dashboard' | 'create'
 
@@ -42,6 +43,23 @@ const EXPECTED_STATUSES: Record<string, string[]> = {
   refund: ['REFUNDED'],
 }
 
+const MAX_TITLE_LENGTH = 160
+const MAX_SPEC_LENGTH = 2000
+const MAX_URL_LENGTH = 1000
+const RECENT_JOBS_KEY = 'proofEscrow:recentJobs'
+
+type RecentJob = {
+  address: Address
+  title: string
+  status: string
+}
+
+const formatElapsed = (seconds: number) => {
+  const mins = Math.floor(seconds / 60).toString().padStart(2, '0')
+  const secs = (seconds % 60).toString().padStart(2, '0')
+  return `${mins}:${secs}`
+}
+
 export default function App() {
   const [account, setAccount] = useState<Address | null>(null)
   const [mode, setMode] = useState<Mode>('dashboard')
@@ -53,6 +71,10 @@ export default function App() {
   const [error, setError] = useState('')
   const [txHash, setTxHash] = useState('')
   const [evidenceUrl, setEvidenceUrl] = useState('')
+  const [recentJobs, setRecentJobs] = useState<RecentJob[]>([])
+  const [recoveryAddress, setRecoveryAddress] = useState('')
+  const [deployStage, setDeployStage] = useState('')
+  const [deployElapsed, setDeployElapsed] = useState(0)
 
   const [title, setTitle] = useState('Landing Page Delivery Escrow')
   const [specification, setSpecification] = useState(
@@ -63,6 +85,17 @@ export default function App() {
   const [maxAttempts, setMaxAttempts] = useState('2')
 
   const operationLock = useRef(false)
+
+  function saveRecentJob(next: RecentJob) {
+    setRecentJobs((current) => {
+      const deduped = current.filter(
+        (item) => item.address.toLowerCase() !== next.address.toLowerCase(),
+      )
+      const updated = [next, ...deduped].slice(0, 8)
+      localStorage.setItem(RECENT_JOBS_KEY, JSON.stringify(updated))
+      return updated
+    })
+  }
 
   const address = useMemo(
     () => (isAddress(contractAddress) ? (contractAddress as Address) : null),
@@ -93,6 +126,15 @@ export default function App() {
         setContractAddress(saved)
         setLoadAddress(saved)
       }
+
+      try {
+        const storedJobs = JSON.parse(
+          localStorage.getItem(RECENT_JOBS_KEY) || '[]',
+        ) as RecentJob[]
+        setRecentJobs(Array.isArray(storedJobs) ? storedJobs : [])
+      } catch {
+        setRecentJobs([])
+      }
     })()
   }, [])
 
@@ -114,6 +156,35 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (!notice) return
+    if (notice.toLowerCase().includes('submitted')) return
+
+    const timer = window.setTimeout(() => setNotice(''), 6000)
+    return () => window.clearTimeout(timer)
+  }, [notice])
+
+  useEffect(() => {
+    if (busy !== 'Deploying escrow' || deployStage !== 'waiting') {
+      if (busy !== 'Deploying escrow') setDeployElapsed(0)
+      return
+    }
+
+    let cancelled = false
+    const startedAt = Date.now()
+
+    const tick = () => {
+      if (cancelled) return
+      setDeployElapsed(Math.floor((Date.now() - startedAt) / 1000))
+      window.setTimeout(tick, 1000)
+    }
+
+    tick()
+    return () => {
+      cancelled = true
+    }
+  }, [busy, deployStage])
+
+  useEffect(() => {
     if (!address) {
       setJob(null)
       return
@@ -131,12 +202,18 @@ export default function App() {
     try {
       const next = await readJob(target)
       setJob(next)
+      saveRecentJob({
+        address: target,
+        title: next.summary.title || 'Loaded escrow',
+        status: next.summary.status,
+      })
       if (!options.quiet) setError('')
       return next
     } catch (err) {
+      console.error('[ProofEscrow] raw refresh error:', err)
       if (options.clearOnFailure) setJob(null)
       if (!options.quiet) {
-        setError(err instanceof Error ? err.message : String(err))
+        setError(normalizeError(err))
       }
       return null
     }
@@ -175,11 +252,16 @@ export default function App() {
     try {
       await action()
     } catch (err) {
+      console.error('[ProofEscrow] raw error:', err)
       if (err instanceof SubmittedButUnconfirmedError) {
         setTxHash(err.hash)
         setNotice(err.message)
+        if (label === 'Deploying escrow') {
+          setDeployStage('recovery')
+          setMode('create')
+        }
       } else {
-        setError(err instanceof Error ? err.message : String(err))
+        setError(normalizeError(err))
       }
     } finally {
       operationLock.current = false
@@ -229,6 +311,13 @@ export default function App() {
       setNotice(
         'Escrow address loaded, but StudioNet RPC is temporarily unavailable. Use Refresh State; do not redeploy.',
       )
+      saveRecentJob({ address: target, title: 'Loaded escrow', status: 'SYNCING' })
+    } else {
+      saveRecentJob({
+        address: target,
+        title: loaded.summary.title || 'Loaded escrow',
+        status: loaded.summary.status,
+      })
     }
   }
 
@@ -243,8 +332,21 @@ export default function App() {
       return
     }
 
-    if (!title.trim() || !specification.trim()) {
+    const cleanTitle = title.trim()
+    const cleanSpecification = specification.trim()
+
+    if (!cleanTitle || !cleanSpecification) {
       setError('Title and specification are required.')
+      return
+    }
+
+    if (cleanTitle.length > MAX_TITLE_LENGTH) {
+      setError(`Job title must be ${MAX_TITLE_LENGTH} characters or fewer.`)
+      return
+    }
+
+    if (cleanSpecification.length > MAX_SPEC_LENGTH) {
+      setError(`Specification must be ${MAX_SPEC_LENGTH} characters or fewer.`)
       return
     }
 
@@ -263,15 +365,19 @@ export default function App() {
       return
     }
 
+    setRecoveryAddress('')
+    setDeployStage('submitting')
+
     await guarded('Deploying escrow', async () => {
       const deployed = await deployEscrow({
         account,
-        title: title.trim(),
-        specification: specification.trim(),
+        title: cleanTitle,
+        specification: cleanSpecification,
         worker: worker as Address,
         rewardWei,
         maxAttempts: attempts,
         onHash: (hash) => setTxHash(hash),
+        onStage: (stage) => setDeployStage(stage),
       })
 
       // Clear any previous escrow immediately so a failed refresh can
@@ -280,6 +386,11 @@ export default function App() {
       setContractAddress(deployed.address)
       setLoadAddress(deployed.address)
       localStorage.setItem(LAST_CONTRACT_KEY, deployed.address)
+      saveRecentJob({
+        address: deployed.address,
+        title: cleanTitle,
+        status: 'OPEN',
+      })
       setMode('dashboard')
 
       const loaded = await pollForExpectedState(
@@ -294,6 +405,36 @@ export default function App() {
           : `Escrow deployed at ${deployed.address}. State refresh is delayed by StudioNet RPC; do not deploy again.`,
       )
     })
+  }
+
+  async function handleRecoverAddress() {
+    if (!isAddress(recoveryAddress)) {
+      setError('Paste a valid deployed contract address from Explorer.')
+      return
+    }
+
+    const target = recoveryAddress as Address
+    setContractAddress(target)
+    setLoadAddress(target)
+    localStorage.setItem(LAST_CONTRACT_KEY, target)
+    saveRecentJob({ address: target, title: title.trim() || 'Recovered escrow', status: 'SYNCING' })
+    setDeployStage('confirmed')
+    setError('')
+    setMode('dashboard')
+
+    const loaded = await pollForExpectedState(target, ['OPEN'], 8)
+    if (loaded) {
+      saveRecentJob({
+        address: target,
+        title: loaded.summary.title || title.trim() || 'Recovered escrow',
+        status: loaded.summary.status,
+      })
+      setNotice(`Recovered escrow ${target}`)
+    } else {
+      setNotice(
+        `Escrow ${target} saved. StudioNet state is still syncing; use Refresh State instead of redeploying.`,
+      )
+    }
   }
 
   async function runWrite(
@@ -369,6 +510,7 @@ export default function App() {
   }
 
   const status = job?.summary.status || ''
+  const role = !account || !job ? '—' : isClient ? 'CLIENT' : isWorker ? 'WORKER' : 'OBSERVER'
 
   return (
     <main className="shell">
@@ -411,14 +553,25 @@ export default function App() {
           </div>
 
           <label>
-            Job title
-            <input value={title} onChange={(e) => setTitle(e.target.value)} />
+            <span className="label-row">
+              <span>Job title</span>
+              <span className="counter">{title.length} / {MAX_TITLE_LENGTH}</span>
+            </span>
+            <input
+              maxLength={MAX_TITLE_LENGTH}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
           </label>
 
           <label>
-            Locked acceptance specification
+            <span className="label-row">
+              <span>Locked acceptance specification</span>
+              <span className="counter">{specification.length} / {MAX_SPEC_LENGTH}</span>
+            </span>
             <textarea
               rows={7}
+              maxLength={MAX_SPEC_LENGTH}
               value={specification}
               onChange={(e) => setSpecification(e.target.value)}
             />
@@ -460,6 +613,43 @@ export default function App() {
           <button className="primary" onClick={handleCreate} disabled={!!busy}>
             {busy === 'Deploying escrow' ? 'Deploying…' : 'Deploy Escrow'}
           </button>
+
+          {busy === 'Deploying escrow' && (
+            <div className="deploy-progress">
+              {deployStage === 'submitting' && <strong>Submitting to wallet…</strong>}
+              {deployStage === 'waiting' && (
+                <strong>Waiting for consensus ({formatElapsed(deployElapsed)})</strong>
+              )}
+              {deployStage === 'confirmed' && <strong>Contract address confirmed.</strong>}
+            </div>
+          )}
+
+          {deployStage === 'recovery' && txHash && (
+            <div className="recovery-box">
+              <strong>Deployment was submitted.</strong>
+              <span>
+                Receipt monitoring did not recover the contract address. Do not deploy again.
+                Open the transaction in Explorer, copy the deployed contract address, and paste it below.
+              </span>
+              <a
+                href={`${EXPLORER_BASE}/transactions/${txHash}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open transaction {short(txHash)} ↗
+              </a>
+              <div className="recovery-row">
+                <input
+                  placeholder="Paste deployed contract address: 0x..."
+                  value={recoveryAddress}
+                  onChange={(e) => setRecoveryAddress(e.target.value)}
+                />
+                <button className="secondary" onClick={handleRecoverAddress}>
+                  Recover Job
+                </button>
+              </div>
+            </div>
+          )}
         </section>
       ) : (
         <>
@@ -481,6 +671,36 @@ export default function App() {
             )}
           </section>
 
+          {recentJobs.length > 0 && (
+            <section className="card recent-jobs">
+              <div className="section-title">
+                <div>
+                  <span>RECENT</span>
+                  <h3>Your recent escrows</h3>
+                </div>
+              </div>
+              <div className="recent-list">
+                {recentJobs.map((item) => (
+                  <button
+                    key={item.address}
+                    className="recent-item"
+                    onClick={() => {
+                      setLoadAddress(item.address)
+                      setContractAddress(item.address)
+                      localStorage.setItem(LAST_CONTRACT_KEY, item.address)
+                    }}
+                  >
+                    <span>
+                      <strong>{item.title}</strong>
+                      <small>{short(item.address)}</small>
+                    </span>
+                    <span className="recent-status">{item.status}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
           {job ? (
             <>
               <section className="hero card">
@@ -492,6 +712,7 @@ export default function App() {
                     <span className="attempts">
                       Attempt {job.summary.attempt_count}/{job.summary.max_attempts}
                     </span>
+                    <span className={`role-badge ${role.toLowerCase()}`}>{role}</span>
                   </div>
                   <h2>{job.summary.title}</h2>
                   <p className="spec">{job.specification}</p>
@@ -550,37 +771,49 @@ export default function App() {
                     </div>
                   </div>
 
-                  {status === 'OPEN' && isClient && (
-                    <button
-                      className="primary"
-                      onClick={() =>
-                        runWrite(
-                          'Funding escrow',
-                          'fund',
-                          [],
-                          BigInt(job.financials.reward_wei),
-                          true,
-                        )
-                      }
-                      disabled={!!busy}
-                    >
-                      Fund {gen(job.financials.reward_wei)}
-                    </button>
+                  {status === 'OPEN' && (
+                    <>
+                      <button
+                        className="primary"
+                        onClick={() =>
+                          runWrite(
+                            'Funding escrow',
+                            'fund',
+                            [],
+                            BigInt(job.financials.reward_wei),
+                            true,
+                          )
+                        }
+                        disabled={!!busy || !isClient}
+                        title={!isClient ? 'Only the client may fund' : undefined}
+                      >
+                        Fund {gen(job.financials.reward_wei)}
+                      </button>
+                      {!isClient && <p className="action-hint">Only the client may fund.</p>}
+                    </>
                   )}
 
                   {(status === 'FUNDED' || status === 'REJECTED') &&
-                    isWorker &&
                     Number(job.summary.attempt_count) <
                       Number(job.summary.max_attempts) && (
                       <>
-                        <input
-                          placeholder="Public evidence URL"
-                          value={evidenceUrl}
-                          onChange={(e) => setEvidenceUrl(e.target.value)}
-                        />
+                        <label className="evidence-field">
+                          <span className="label-row">
+                            <span>Public evidence URL</span>
+                            <span className="counter">{evidenceUrl.length} / {MAX_URL_LENGTH}</span>
+                          </span>
+                          <input
+                            placeholder="https://..."
+                            maxLength={MAX_URL_LENGTH}
+                            value={evidenceUrl}
+                            onChange={(e) => setEvidenceUrl(e.target.value)}
+                            disabled={!isWorker}
+                          />
+                        </label>
                         <button
                           className="primary"
-                          disabled={!!busy || !evidenceUrl.trim()}
+                          disabled={!!busy || !isWorker || !evidenceUrl.trim()}
+                          title={!isWorker ? 'Only the worker may submit evidence' : undefined}
                           onClick={() =>
                             runWrite(
                               'Submitting deliverable',
@@ -593,6 +826,9 @@ export default function App() {
                             ? 'Resubmit Deliverable'
                             : 'Submit Deliverable'}
                         </button>
+                        {!isWorker && (
+                          <p className="action-hint">Only the worker may submit evidence.</p>
+                        )}
                       </>
                     )}
 
@@ -623,40 +859,48 @@ export default function App() {
                     </button>
                   )}
 
-                  {status === 'ACCEPTED_RESERVED' && isWorker && (
-                    <button
-                      className="primary"
-                      disabled={!!busy}
-                      onClick={() =>
-                        runWrite(
-                          'Withdrawing GEN',
-                          'withdraw',
-                          [],
-                          0n,
-                          true,
-                        )
-                      }
-                    >
-                      Withdraw {gen(job.financials.pending_payout_wei)}
-                    </button>
+                  {status === 'ACCEPTED_RESERVED' && (
+                    <>
+                      <button
+                        className="primary"
+                        disabled={!!busy || !isWorker}
+                        title={!isWorker ? 'Only the worker may withdraw' : undefined}
+                        onClick={() =>
+                          runWrite(
+                            'Withdrawing GEN',
+                            'withdraw',
+                            [],
+                            0n,
+                            true,
+                          )
+                        }
+                      >
+                        Withdraw {gen(job.financials.pending_payout_wei)}
+                      </button>
+                      {!isWorker && <p className="action-hint">Only the worker may withdraw.</p>}
+                    </>
                   )}
 
-                  {status === 'REJECTED' && isClient && (
-                    <button
-                      className="danger"
-                      disabled={!!busy}
-                      onClick={() =>
-                        runWrite(
-                          'Refunding client',
-                          'refund',
-                          [],
-                          0n,
-                          true,
-                        )
-                      }
-                    >
-                      Close & Refund
-                    </button>
+                  {status === 'REJECTED' && (
+                    <>
+                      <button
+                        className="danger"
+                        disabled={!!busy || !isClient}
+                        title={!isClient ? 'Only the client may refund' : undefined}
+                        onClick={() =>
+                          runWrite(
+                            'Refunding client',
+                            'refund',
+                            [],
+                            0n,
+                            true,
+                          )
+                        }
+                      >
+                        Close & Refund
+                      </button>
+                      {!isClient && <p className="action-hint">Only the client may refund.</p>}
+                    </>
                   )}
 
                   {!account && <p>Connect the relevant wallet to act.</p>}
@@ -721,18 +965,31 @@ export default function App() {
 
       {(notice || error || txHash || busy) && (
         <aside className={`toast ${error ? 'error' : ''}`}>
-          {busy && <strong>{busy}…</strong>}
-          {notice && <span>{notice}</span>}
-          {error && <span>{error}</span>}
-          {txHash && (
-            <a
-              href={`${EXPLORER_BASE}/transactions/${txHash}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Transaction {short(txHash)} ↗
-            </a>
-          )}
+          <button
+            className="toast-close"
+            aria-label="Dismiss message"
+            onClick={() => {
+              setNotice('')
+              setError('')
+              if (!busy) setTxHash('')
+            }}
+          >
+            ×
+          </button>
+          <div className="toast-content">
+            {busy && <strong>{busy}…</strong>}
+            {notice && <span>{notice}</span>}
+            {error && <span>{error}</span>}
+            {txHash && (
+              <a
+                href={`${EXPLORER_BASE}/transactions/${txHash}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Transaction {short(txHash)} ↗
+              </a>
+            )}
+          </div>
         </aside>
       )}
     </main>
