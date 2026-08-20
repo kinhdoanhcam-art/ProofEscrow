@@ -221,8 +221,10 @@ export async function deployEscrow(params: {
   rewardWei: bigint
   maxAttempts: number
   onHash?: (hash: Address) => void
+  onStage?: (stage: 'submitting' | 'waiting' | 'confirmed') => void
 }): Promise<{ address: Address; hash: Address }> {
   const client = createWriteClient(params.account)
+  params.onStage?.('submitting')
   await client.connect()
 
   const hash = (await client.deployContract({
@@ -237,24 +239,28 @@ export async function deployEscrow(params: {
   })) as Address
 
   params.onHash?.(hash)
+  params.onStage?.('waiting')
 
   try {
     const receipt = await waitForReceiptResilient({
       hash,
-      status: TransactionStatus.FINALIZED,
+      status: TransactionStatus.ACCEPTED,
       fullTransaction: true,
-      rounds: 7,
+      rounds: 4,
     })
 
     if (
       receipt.txExecutionResultName &&
       receipt.txExecutionResultName === ExecutionResult.FINISHED_WITH_ERROR
     ) {
-      throw new Error('Contract deployment finalized with an execution error.')
+      throw new Error('Contract deployment was accepted with an execution error.')
     }
 
+    const address = contractAddressFromReceipt(receipt)
+    params.onStage?.('confirmed')
+
     return {
-      address: contractAddressFromReceipt(receipt),
+      address,
       hash,
     }
   } catch (error) {
@@ -264,7 +270,7 @@ export async function deployEscrow(params: {
 
     throw new SubmittedButUnconfirmedError(
       hash,
-      'The deployment transaction was submitted, but RPC monitoring could not confirm the final receipt. Do not deploy again yet; check the transaction hash in Studio/Explorer.',
+      'The deployment transaction was submitted, but RPC monitoring could not recover the contract address yet. Do not deploy again. Open the transaction in Explorer, then paste the deployed contract address into the recovery field.',
     )
   }
 }
