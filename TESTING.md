@@ -14,70 +14,138 @@ GitHub:
 
 https://github.com/kinhdoanhcam-art/ProofEscrow
 
-## Validation Coverage
+## Important Testing Status
 
-The same escrow logic has previously been validated for:
+The current contract remains unchanged during this steward-feedback fix.
 
-```text
-✓ exact native GEN funding
-✓ Client-only funding
-✓ Worker-only evidence submission
-✓ evidence URL persistence
-✓ consensus-reviewed snapshot
-✓ ACCEPTED adjudication
-✓ reward reservation
-✓ Worker withdrawal
-✓ REJECTED adjudication
-✓ Client refund
-✓ resubmission after rejection
-✓ maximum-attempt tracking
-✓ final escrow accounting
-✓ RPC-safe frontend behavior
-```
+This update changes the frontend error handling, deployment recovery flow, and UI/UX only. Do **not** treat older deployments or earlier runs as proof that this exact frontend revision has passed the browser flow.
 
-The current deployment uses the same validated contract logic.
-
-## Minimal Positive Flow
+### Verified before this fix
 
 ```text
-1. fund()
-2. submit_deliverable()
-3. commit_reviewed_snapshot()
-4. adjudicate()
-5. withdraw()
+- npm install completed successfully on the reviewed source
+- npm run build passed on the pre-fix source
+- ProofEscrow.py parsed successfully as Python
+- genlayer-js@1.1.8 deployment/write/receipt code was inspected directly
 ```
 
-Wait for each write to reach `FINALIZED`.
-
-## Expected Positive Accounting
-
-After funding:
+### Must be re-tested after applying this fix
 
 ```text
-pool = reward
-reserved = 0
-pending payout = 0
+[ ] Create Job with a valid wallet and inputs
+[ ] Reject a wallet request and confirm a readable message is shown
+[ ] Confirm a submitted deploy never loses its transaction hash
+[ ] Confirm the created contract address is loaded when ACCEPTED receipt exposes it
+[ ] Confirm manual address recovery works when receipt monitoring cannot recover the address
+[ ] Confirm >2000-character specification is blocked before submission
+[ ] Confirm toast can be dismissed
+[ ] Confirm recent-job list can reload a saved escrow
+[ ] Confirm role badge and disabled-with-reason action controls render correctly
+[ ] npm run build on the final pushed source
 ```
 
-After acceptance:
+## Required Re-test — 5 Steps
+
+### 1. Create Job — normal path
+
+**Input**
+
+- valid Client wallet
+- valid Worker address
+- title <= 160 characters
+- specification <= 2000 characters
+- positive GEN reward
+- attempts between 1 and 5
+
+**Expected**
 
 ```text
-status = ACCEPTED_RESERVED
-pool = reward
-reserved = reward
-pending payout = reward
+Submitting to wallet
+→ Waiting for consensus
+→ contract address recovered from ACCEPTED receipt
+→ app loads the new escrow
 ```
 
-After withdrawal:
+The address must be persisted in the recent-job list and `LAST_CONTRACT_KEY`.
+
+Do not redeploy merely because later state refresh is delayed.
+
+### 2. Reject the wallet request
+
+Start Create Job, then press **Reject** in MetaMask / the wallet prompt.
+
+**Expected**
+
+A readable message such as:
 
 ```text
-status = PAID
-pool = 0
-reserved = 0
-pending payout = 0
+You rejected the request in your wallet.
 ```
 
-## Rejected / Refund Path
+The UI must never display:
+
+```text
+[object Object]
+```
+
+Open the browser console and confirm the raw provider error is also logged for debugging.
+
+### 3. Client-side length guard
+
+Paste a specification longer than 2000 characters.
+
+**Expected**
+
+The textarea is capped at 2000 characters and displays a live counter.
+No deployment transaction is submitted for an oversized specification.
+
+Also confirm:
+
+```text
+Job title <= 160 characters
+Evidence URL <= 1000 characters
+```
+
+### 4. Toast / recovery UX
+
+Trigger a visible error.
+
+**Expected**
+
+- toast has a close button;
+- long text scrolls instead of covering the app;
+- informational notices auto-dismiss after roughly 6 seconds;
+- submitted-but-unconfirmed notices remain visible;
+- if a deploy hash exists but the address cannot be recovered, the Create page shows the Explorer link and manual address-recovery field.
+
+### 5. Final build
+
+```bash
+npm install
+npm run build
+```
+
+**Expected**
+
+```text
+PASS
+```
+
+Record the actual result here only after running it on the final source.
+
+## Contract Flow — Not Re-claimed Here
+
+The escrow contract exposes the following intended positive flow:
+
+```text
+fund
+→ submit_deliverable
+→ commit_reviewed_snapshot
+→ adjudicate
+→ withdraw
+```
+
+and rejected/refund flow:
 
 ```text
 fund
@@ -86,55 +154,12 @@ fund
 → adjudicate
 → REJECTED
 → refund
-→ REFUNDED
 ```
 
-## Resubmission
-
-With `max_attempts = 2`:
-
-```text
-FUNDED
-→ SUBMITTED (1/2)
-→ SNAPSHOT_COMMITTED
-→ REJECTED
-→ SUBMITTED (2/2)
-→ SNAPSHOT_COMMITTED
-→ ACCEPTED_RESERVED
-→ PAID
-```
-
-## Authorization Checks
-
-Expected failures:
-
-```text
-non-Client → fund()
-non-Worker → submit_deliverable()
-non-Worker → withdraw()
-non-Client → refund()
-```
-
-## Wrong-State Checks
-
-Expected failures:
-
-```text
-submit before FUNDED
-commit snapshot before SUBMITTED
-adjudicate before SNAPSHOT_COMMITTED
-withdraw before ACCEPTED_RESERVED
-refund before REJECTED
-```
+These flows should be marked PASS for the current deployment only after they are actually executed and observed on that deployment.
 
 ## RPC Safety
 
-If a write already returned a transaction hash, the frontend does not automatically resend that write just because receipt monitoring fails. Refresh contract state first.
+Once `deployContract` or `writeContract` returns a transaction hash, the frontend must **never automatically send the same transaction again** just because receipt monitoring fails.
 
-## Low-RPC Recommendation
-
-To conserve StudioNet quota, do not repeat full testing unless needed. For one positive verification:
-
-```text
-fund → submit → snapshot → adjudicate → withdraw
-```
+Use the transaction hash, Explorer, manual address recovery, and state refresh instead.

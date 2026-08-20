@@ -88,26 +88,23 @@ If attempts remain, the Worker may submit replacement evidence. The Client may c
 
 StudioNet can occasionally rate-limit or temporarily fail receipt requests. The frontend separates submission from finalization monitoring and uses bounded retry/backoff. Once a write returns a transaction hash, the UI does not automatically submit the same write again merely because receipt monitoring later fails.
 
-## Validation
+## Verification Status
 
-The unchanged escrow logic has been validated across the principal flows:
+The current steward-feedback update is frontend/docs only; the deployed contract is unchanged.
 
-```text
-✓ native GEN funding
-✓ Worker evidence submission
-✓ consensus-reviewed snapshot
-✓ ACCEPTED adjudication
-✓ reward reservation
-✓ Worker withdrawal
-✓ REJECTED adjudication
-✓ Client refund
-✓ rejected-work resubmission
-✓ maximum-attempt tracking
-✓ final accounting
-✓ RPC-safe write handling
-```
+The revised browser flow must be re-tested before resubmission. This README does not inherit PASS claims from earlier deployments. See [`TESTING.md`](./TESTING.md) for the exact re-test checklist.
 
-The current deployment is a redeployment of the same validated contract logic.
+The frontend now focuses on safe StudioNet UX:
+
+- plain-object wallet/RPC errors are normalized instead of rendering `[object Object]`;
+- raw provider errors are also logged to the browser console;
+- deployment waits for an `ACCEPTED` receipt to recover the contract address sooner;
+- once a deployment hash exists, the app never automatically redeploys because receipt monitoring failed;
+- submitted deployments expose the Explorer transaction and a manual contract-address recovery path;
+- create inputs mirror contract length limits;
+- notices can be dismissed and long errors scroll;
+- recent escrows are stored locally for easier recovery;
+- the connected wallet role is visible and role-restricted actions remain visible in a disabled state with an explanation.
 
 ## Current Deployment
 
@@ -144,16 +141,19 @@ ProofEscrow/
 ├── src/
 │   ├── lib/
 │   │   ├── config.ts
+│   │   ├── errors.ts
 │   │   └── genlayer.ts
 │   ├── App.tsx
 │   ├── main.tsx
 │   └── styles.css
-├── .env.example
 ├── README.md
 ├── TESTING.md
-├── ProofEscrow_Submission_Note.txt
 ├── package.json
-└── vite.config.ts
+├── package-lock.json
+├── tsconfig.app.json
+├── tsconfig.json
+├── vite.config.ts
+└── index.html
 ```
 
 ## Status
