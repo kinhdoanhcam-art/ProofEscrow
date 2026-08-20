@@ -86,25 +86,63 @@ If attempts remain, the Worker may submit replacement evidence. The Client may c
 
 ## RPC Reliability
 
-StudioNet can occasionally rate-limit or temporarily fail receipt requests. The frontend separates submission from finalization monitoring and uses bounded retry/backoff. Once a write returns a transaction hash, the UI does not automatically submit the same write again merely because receipt monitoring later fails.
+StudioNet can occasionally rate-limit or temporarily fail receipt requests. The frontend separates submission from receipt monitoring and uses bounded retry/backoff. Once a write returns a transaction hash, the UI does not automatically submit the same write again merely because receipt monitoring later fails.
 
-## Verification Status
+For deployment, the frontend waits for an `ACCEPTED` receipt so the new contract address can be recovered sooner. If receipt monitoring cannot recover the address, the transaction hash remains available with an Explorer/recovery path instead of automatically deploying again.
 
-The current steward-feedback update is frontend/docs only; the deployed contract is unchanged.
+## Steward Feedback Fix
 
-The revised browser flow must be re-tested before resubmission. This README does not inherit PASS claims from earlier deployments. See [`TESTING.md`](./TESTING.md) for the exact re-test checklist.
+The Aug 2026 steward feedback reported:
 
-The frontend now focuses on safe StudioNet UX:
+```text
+Creating a job shows this error [object Object]
+please work on your UI/UX
+```
+
+The frontend/docs update addresses that feedback without changing the deployed contract.
+
+Changes include:
 
 - plain-object wallet/RPC errors are normalized instead of rendering `[object Object]`;
-- raw provider errors are also logged to the browser console;
-- deployment waits for an `ACCEPTED` receipt to recover the contract address sooner;
-- once a deployment hash exists, the app never automatically redeploys because receipt monitoring failed;
-- submitted deployments expose the Explorer transaction and a manual contract-address recovery path;
-- create inputs mirror contract length limits;
-- notices can be dismissed and long errors scroll;
-- recent escrows are stored locally for easier recovery;
-- the connected wallet role is visible and role-restricted actions remain visible in a disabled state with an explanation.
+- raw provider errors are logged to the browser console for debugging;
+- deployment waits for `ACCEPTED` instead of requiring long `FINALIZED` monitoring before recovering the address;
+- submitted deployments preserve the transaction hash and expose recovery UI;
+- transaction progress is shown in stages;
+- create inputs mirror the contract's text limits and show live counters;
+- toasts are dismissible and long error content is scrollable;
+- recent escrows are stored locally;
+- the connected role is shown as `CLIENT`, `WORKER`, or `OBSERVER`;
+- role-restricted actions remain visible but disabled with an explanation.
+
+## Verified Frontend Re-Test
+
+The final steward-fix frontend was tested in the browser against StudioNet.
+
+Verified:
+
+```text
+PASS  npm run build
+PASS  Create Job with valid inputs
+PASS  Newly created escrow address loaded into the app
+PASS  Newly created escrow appeared in Recent Escrows
+PASS  MetaMask Reject produced a readable error instead of [object Object]
+PASS  Specification input capped at 2000 / 2000
+PASS  Error toast could be closed with ×
+PASS  WORKER role badge rendered for the Worker wallet
+PASS  Client-only Fund action stayed visible but disabled for Worker
+PASS  Disabled action displayed: "Only the client may fund."
+```
+
+Not claimed as browser-verified in this re-test:
+
+```text
+- manual recovery after an intentionally forced receipt-monitoring failure
+- informational toast auto-dismiss timing
+- long-error scrolling under an intentionally oversized RPC error
+- full fund → submit → snapshot → adjudicate → withdraw/refund settlement flow
+```
+
+See [`TESTING.md`](./TESTING.md) for the exact observed test record.
 
 ## Current Deployment
 
@@ -115,6 +153,10 @@ The frontend now focuses on safe StudioNet UX:
 Explorer:
 
 https://explorer-studio.genlayer.com/address/0xdD4ecd08d0F23E504b2Bdd6bD1150a5d3C630436
+
+## Live App
+
+https://proof-escrow-bay.vercel.app/
 
 ## GitHub
 
@@ -158,4 +200,4 @@ ProofEscrow/
 
 ## Status
 
-**Deployed on GenLayer StudioNet.**
+**Deployed on GenLayer StudioNet. Steward-feedback frontend fix re-tested and ready for resubmission.**

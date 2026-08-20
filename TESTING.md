@@ -1,165 +1,321 @@
-# ProofEscrow — Testing Guide
+# ProofEscrow — Testing
 
-## Current Contract
+## Current Deployment
+
+**Network:** GenLayer StudioNet
+
+**Contract**
 
 ```text
 0xdD4ecd08d0F23E504b2Bdd6bD1150a5d3C630436
 ```
 
-Explorer:
+**Explorer**
 
 https://explorer-studio.genlayer.com/address/0xdD4ecd08d0F23E504b2Bdd6bD1150a5d3C630436
 
-GitHub:
+**Live App**
+
+https://proof-escrow-bay.vercel.app/
+
+**GitHub**
 
 https://github.com/kinhdoanhcam-art/ProofEscrow
 
-## Important Testing Status
+## Scope of This Re-Test
 
-The current contract remains unchanged during this steward-feedback fix.
+The steward-feedback fix is frontend/docs only. `contracts/ProofEscrow.py` and the deployed base contract address above were not changed for this fix.
 
-This update changes the frontend error handling, deployment recovery flow, and UI/UX only. Do **not** treat older deployments or earlier runs as proof that this exact frontend revision has passed the browser flow.
+The browser tests below record only what was actually observed after the updated frontend was deployed.
 
-### Verified before this fix
+---
 
-```text
-- npm install completed successfully on the reviewed source
-- npm run build passed on the pre-fix source
-- ProofEscrow.py parsed successfully as Python
-- genlayer-js@1.1.8 deployment/write/receipt code was inspected directly
-```
+## Build — PASS
 
-### Must be re-tested after applying this fix
-
-```text
-[ ] Create Job with a valid wallet and inputs
-[ ] Reject a wallet request and confirm a readable message is shown
-[ ] Confirm a submitted deploy never loses its transaction hash
-[ ] Confirm the created contract address is loaded when ACCEPTED receipt exposes it
-[ ] Confirm manual address recovery works when receipt monitoring cannot recover the address
-[ ] Confirm >2000-character specification is blocked before submission
-[ ] Confirm toast can be dismissed
-[ ] Confirm recent-job list can reload a saved escrow
-[ ] Confirm role badge and disabled-with-reason action controls render correctly
-[ ] npm run build on the final pushed source
-```
-
-## Required Re-test — 5 Steps
-
-### 1. Create Job — normal path
-
-**Input**
-
-- valid Client wallet
-- valid Worker address
-- title <= 160 characters
-- specification <= 2000 characters
-- positive GEN reward
-- attempts between 1 and 5
-
-**Expected**
-
-```text
-Submitting to wallet
-→ Waiting for consensus
-→ contract address recovered from ACCEPTED receipt
-→ app loads the new escrow
-```
-
-The address must be persisted in the recent-job list and `LAST_CONTRACT_KEY`.
-
-Do not redeploy merely because later state refresh is delayed.
-
-### 2. Reject the wallet request
-
-Start Create Job, then press **Reject** in MetaMask / the wallet prompt.
-
-**Expected**
-
-A readable message such as:
-
-```text
-You rejected the request in your wallet.
-```
-
-The UI must never display:
-
-```text
-[object Object]
-```
-
-Open the browser console and confirm the raw provider error is also logged for debugging.
-
-### 3. Client-side length guard
-
-Paste a specification longer than 2000 characters.
-
-**Expected**
-
-The textarea is capped at 2000 characters and displays a live counter.
-No deployment transaction is submitted for an oversized specification.
-
-Also confirm:
-
-```text
-Job title <= 160 characters
-Evidence URL <= 1000 characters
-```
-
-### 4. Toast / recovery UX
-
-Trigger a visible error.
-
-**Expected**
-
-- toast has a close button;
-- long text scrolls instead of covering the app;
-- informational notices auto-dismiss after roughly 6 seconds;
-- submitted-but-unconfirmed notices remain visible;
-- if a deploy hash exists but the address cannot be recovered, the Create page shows the Explorer link and manual address-recovery field.
-
-### 5. Final build
+Command:
 
 ```bash
-npm install
 npm run build
 ```
 
-**Expected**
+Observed:
+
+```text
+vite v6.4.3 building for production...
+476 modules transformed.
+built in 3.40s
+```
+
+Result:
 
 ```text
 PASS
 ```
 
-Record the actual result here only after running it on the final source.
+The chunk-size message was a Vite optimization warning, not a build failure.
 
-## Contract Flow — Not Re-claimed Here
+---
 
-The escrow contract exposes the following intended positive flow:
+## Test 1 — Create Job — PASS
 
-```text
-fund
-→ submit_deliverable
-→ commit_reviewed_snapshot
-→ adjudicate
-→ withdraw
-```
-
-and rejected/refund flow:
+Client wallet:
 
 ```text
-fund
-→ submit_deliverable
-→ commit_reviewed_snapshot
-→ adjudicate
-→ REJECTED
-→ refund
+0x3065E31B1D993d7C0D59E6786844cBa56780B2d3
 ```
 
-These flows should be marked PASS for the current deployment only after they are actually executed and observed on that deployment.
+Worker wallet:
 
-## RPC Safety
+```text
+0x5a52d040581A76e2C032542855D31480f2ea7097
+```
 
-Once `deployContract` or `writeContract` returns a transaction hash, the frontend must **never automatically send the same transaction again** just because receipt monitoring fails.
+Input:
 
-Use the transaction hash, Explorer, manual address recovery, and state refresh instead.
+```text
+Job title:
+Landing Page Design
+
+Locked acceptance specification:
+Worker must deliver a responsive landing page with desktop and mobile layouts, source files, and a public preview link.
+
+Reward:
+5 GEN
+
+Max submission attempts:
+2
+```
+
+Observed after wallet confirmation:
+
+```text
+status: OPEN
+reward: 5 GEN
+attempt: 0/2
+role: CLIENT
+pool: 0 GEN
+reserved: 0 GEN
+pending payout: 0 GEN
+```
+
+The new escrow loaded into the app successfully and appeared in `Your recent escrows`.
+
+Result:
+
+```text
+PASS
+```
+
+This directly verifies that the steward's original Create Job flow no longer ends in `[object Object]` on the successful path.
+
+---
+
+## Test 2 — Reject MetaMask Request — PASS
+
+Input:
+
+```text
+Job title:
+Reject Test
+
+Specification:
+This is a temporary test job used only to verify wallet rejection handling.
+
+Reward:
+1 GEN
+
+Max submission attempts:
+1
+```
+
+Action:
+
+```text
+Deploy Escrow
+→ Reject transaction signature in MetaMask
+```
+
+Observed user-facing error:
+
+```text
+User rejected the request.
+Details: MetaMask Tx Signature:
+User denied transaction signature.
+Version: viem@2.55.13
+```
+
+Important result:
+
+```text
+[object Object]
+```
+
+was **not** displayed.
+
+Result:
+
+```text
+PASS
+```
+
+Note: the current message is functionally correct but still includes viem detail text. This is acceptable for the steward fix; future polish could keep only the friendly sentence in the toast and leave raw detail in the console.
+
+---
+
+## Test 3 — Specification Length Guard — PASS
+
+A clipboard string of 2101 characters was pasted into:
+
+```text
+Locked acceptance specification
+```
+
+Observed counter:
+
+```text
+2000 / 2000
+```
+
+The field did not accept content beyond the contract limit.
+
+Result:
+
+```text
+PASS
+```
+
+This verifies the frontend guard for `MAX_SPEC_LENGTH = 2000`.
+
+Title and evidence URL limits are implemented in the UI, but were not separately stress-tested in this browser run, so they are not marked PASS here.
+
+---
+
+## Test 4 — Error Toast Dismissal — PASS
+
+A MetaMask rejection was triggered to display an error toast.
+
+Observed:
+
+- error toast rendered in the lower-right area;
+- toast showed a visible `×` close control;
+- clicking `×` removed the toast immediately;
+- the page did not reload;
+- form contents remained intact.
+
+Result:
+
+```text
+PASS
+```
+
+Long-error scrolling and informational auto-dismiss timing were not intentionally stress-tested in this run.
+
+---
+
+## Test 5 — Worker Role UX — PASS
+
+The connected wallet was changed to the Worker:
+
+```text
+0x5a52d040581A76e2C032542855D31480f2ea7097
+```
+
+The `Landing Page Design` escrow was opened.
+
+Observed:
+
+```text
+role badge: WORKER
+status: OPEN
+reward: 5 GEN
+```
+
+The Client-only action remained visible:
+
+```text
+Fund 5 GEN
+```
+
+but was disabled.
+
+The UI displayed the reason:
+
+```text
+Only the client may fund.
+```
+
+Result:
+
+```text
+PASS
+```
+
+This verifies the new role badge and disabled-with-reason behavior.
+
+---
+
+## Recent Escrows — Observed
+
+After creating `Landing Page Design`, the app displayed it in:
+
+```text
+Your recent escrows
+```
+
+alongside the previously known escrow.
+
+This confirms the recent-job UI rendered the newly created escrow during this browser session.
+
+A separate browser/session persistence test was not performed, so cross-session persistence is not separately claimed.
+
+---
+
+## Verified Summary
+
+```text
+PASS  npm run build
+PASS  Create Job
+PASS  Created escrow loaded successfully
+PASS  Newly created escrow shown in Recent Escrows
+PASS  MetaMask rejection no longer shows [object Object]
+PASS  2000-character specification limit
+PASS  Error toast can be dismissed
+PASS  WORKER role badge
+PASS  Client-only Fund button disabled for Worker
+PASS  Disabled-action explanation
+```
+
+## Not Yet Re-Verified in This Browser Run
+
+The following are intentionally **not** marked PASS:
+
+```text
+- forced submitted-but-unconfirmed deployment recovery
+- manual address recovery after deliberately failing receipt monitoring
+- informational toast auto-dismiss timing
+- long-error scroll behavior under an oversized provider/RPC message
+- title 160-character stress test
+- evidence URL 1000-character stress test
+- full funded settlement path:
+  fund
+  → submit_deliverable
+  → commit_reviewed_snapshot
+  → adjudicate
+  → withdraw
+
+- rejected/refund path:
+  fund
+  → submit_deliverable
+  → commit_reviewed_snapshot
+  → adjudicate
+  → REJECTED
+  → refund
+```
+
+These should only be marked PASS after an actual run on the current deployment/frontend.
+
+## RPC Safety Rule
+
+Once `deployContract` or `writeContract` returns a transaction hash, the frontend must **never automatically send the same transaction again** merely because receipt monitoring fails.
+
+Use the existing transaction hash, Explorer/recovery UI, and state refresh instead.
