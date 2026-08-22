@@ -1,3 +1,22 @@
+/** EIP-1193 error code, including the nested shapes providers use. */
+export function errorCode(error: unknown, depth = 0): number | undefined {
+  if (!error || typeof error !== 'object' || depth > 4) return undefined
+
+  const value = error as Record<string, unknown>
+  const direct = Number(value.code)
+  if (Number.isFinite(direct)) return direct
+
+  for (const key of ['data', 'cause', 'error', 'originalError'] as const) {
+    const nested: unknown = value[key]
+    if (nested && nested !== error) {
+      const found = errorCode(nested, depth + 1)
+      if (found !== undefined) return found
+    }
+  }
+
+  return undefined
+}
+
 export function normalizeError(error: unknown): string {
   if (typeof error === 'string') return error
 
@@ -14,7 +33,17 @@ export function normalizeError(error: unknown): string {
     }
 
     if (code === -32601) {
-      return 'Your wallet does not support the GenLayer snap.'
+      // The GenLayer Snap is optional for this app, so this can only ever be
+      // shown as a note — never as a reason a connection failed.
+      return 'Your wallet does not support the optional GenLayer Snap. ProofEscrow works without it.'
+    }
+
+    if (code === -32002) {
+      return 'MetaMask already has a pending request. Open the extension and finish it first.'
+    }
+
+    if (code === 4902) {
+      return 'GenLayer Studio is not added to your wallet yet.'
     }
 
     if (typeof value.message === 'string' && value.message.trim()) {

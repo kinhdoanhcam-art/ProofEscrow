@@ -3,6 +3,7 @@ import { studionet } from 'genlayer-js/chains'
 import { ExecutionResult, TransactionStatus } from 'genlayer-js/types'
 
 import contractSource from '../../contracts/ProofEscrow.py?raw'
+import { errorCode, normalizeError } from './errors'
 
 export type Address = `0x${string}`
 
@@ -118,7 +119,84 @@ export async function getAuthorizedAccount(): Promise<Address | null> {
   return accounts[0] ? (accounts[0] as Address) : null
 }
 
-export async function connectWallet(): Promise<Address> {
+export const STUDIO_CHAIN_ID = 61999
+export const STUDIO_CHAIN_ID_HEX = '0xf22f'
+
+/**
+ * What MetaMask needs to add the network. The RPC is the direct Studio endpoint
+ * because the wallet dials it itself.
+ */
+const STUDIO_CHAIN_PARAMS = {
+  chainId: STUDIO_CHAIN_ID_HEX,
+  chainName: 'Genlayer Studio Network',
+  rpcUrls: ['https://studio.genlayer.com/api'],
+  nativeCurrency: { name: 'GEN Token', symbol: 'GEN', decimals: 18 },
+  blockExplorerUrls: ['https://explorer-studio.genlayer.com'],
+}
+
+/**
+ * Put the wallet on GenLayer Studio.
+ *
+ * Done here instead of through the SDK's connect() so that each prompt has its
+ * own error, and so the optional GenLayer Snap can never be part of the path.
+ */
+export async function ensureStudioChain(): Promise<void> {
+  if (!window.ethereum) {
+    throw new Error('MetaMask was not found.')
+  }
+
+  const current = (await window.ethereum.request({
+    method: 'eth_chainId',
+  })) as string
+
+  if (typeof current === 'string' && current.toLowerCase() === STUDIO_CHAIN_ID_HEX) {
+    return
+  }
+
+  try {
+    await window.ethereum.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: STUDIO_CHAIN_ID_HEX }],
+    })
+    return
+  } catch (switchError) {
+    // 4902 = the wallet does not know this chain yet. Everything else is a real
+    // failure (rejection, pending request) and must surface to the caller.
+    if (errorCode(switchError) !== 4902) throw switchError
+  }
+
+  await window.ethereum.request({
+    method: 'wallet_addEthereumChain',
+    params: [STUDIO_CHAIN_PARAMS],
+  })
+
+  await window.ethereum.request({
+    method: 'wallet_switchEthereumChain',
+    params: [{ chainId: STUDIO_CHAIN_ID_HEX }],
+  })
+}
+
+export type ConnectResult = {
+  address: Address
+  /** Non-fatal: connected, but something optional did not complete. */
+  warning?: string
+}
+
+/**
+ * Connect the wallet.
+ *
+ * The account is authoritative the moment eth_requestAccounts resolves, so it is
+ * returned even when a later step fails. Previously this returned only after the
+ * SDK's connect() had also added the network, switched to it, called
+ * wallet_getSnaps and installed the GenLayer Snap — none of it guarded. A wallet
+ * without Snap support threw at wallet_getSnaps, so the whole connection failed
+ * with "Your wallet does not support the GenLayer snap."
+ *
+ * The Snap is not required here: in genlayer-js the snap APIs are used only
+ * inside connect() and the metamaskClient() diagnostic. Reads use HTTP and writes
+ * use plain eth_sendTransaction. So it is attempted best-effort, and never blocks.
+ */
+export async function connectWallet(): Promise<ConnectResult> {
   if (!window.ethereum) {
     throw new Error('MetaMask was not found.')
   }
@@ -132,15 +210,34 @@ export async function connectWallet(): Promise<Address> {
   }
 
   const address = accounts[0] as Address
+  let warning: string | undefined
 
-  const client = createClient({
-    chain: studionet,
-    account: address,
-    provider: window.ethereum,
-  })
+  try {
+    await ensureStudioChain()
+  } catch (chainError) {
+    console.warn('[ProofEscrow] network switch did not complete', chainError)
+    warning = `Connected, but MetaMask is not on GenLayer Studio yet: ${normalizeError(chainError)}`
+  }
 
-  await client.connect()
-  return address
+  // Optional Snap install. Skipped when the chain step already failed, because
+  // the SDK repeats the add/switch prompts and re-prompting someone who just
+  // declined is worse than not offering the Snap at all.
+  if (warning === undefined) {
+    try {
+      const client = createClient({
+        chain: studionet,
+        account: address,
+        provider: window.ethereum,
+      })
+      // The ONLY place client.connect() is still called. Its value here is the
+      // optional Snap install; the chain is already handled above.
+      await client.connect()
+    } catch (snapError) {
+      console.warn('[ProofEscrow] optional GenLayer Snap step skipped', snapError)
+    }
+  }
+
+  return warning === undefined ? { address } : { address, warning }
 }
 
 function createWriteClient(account: Address) {
@@ -225,7 +322,10 @@ export async function deployEscrow(params: {
 }): Promise<{ address: Address; hash: Address }> {
   const client = createWriteClient(params.account)
   params.onStage?.('submitting')
-  await client.connect()
+  // Guarantees the wallet is on GenLayer Studio. Deliberately NOT client.connect():
+  // that also runs the optional Snap flow, which used to fail the whole action on
+  // wallets without Snap support.
+  await ensureStudioChain()
 
   const hash = (await client.deployContract({
     code: new TextEncoder().encode(contractSource),
@@ -285,7 +385,10 @@ export async function writeEscrow(params: {
   onHash?: (hash: Address) => void
 }): Promise<Address> {
   const client = createWriteClient(params.account)
-  await client.connect()
+  // Guarantees the wallet is on GenLayer Studio. Deliberately NOT client.connect():
+  // that also runs the optional Snap flow, which used to fail the whole action on
+  // wallets without Snap support.
+  await ensureStudioChain()
 
   let hash: Address
 

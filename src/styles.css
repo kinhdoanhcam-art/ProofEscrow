@@ -419,3 +419,102 @@ pre {
   .recovery-row { grid-template-columns: 1fr; }
   .recent-item { align-items: flex-start; }
 }
+
+/* ---- lifecycle stepper + plain-language explainers ---- */
+
+.status-explainer {
+  margin: 10px 0 0;
+  color: #9fb3c8;
+  font-size: 13px;
+  line-height: 1.55;
+  max-width: 62ch;
+}
+
+.stepper {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 16px;
+}
+
+.stepper .step {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 9px;
+  align-items: start;
+  padding: 11px;
+  border-radius: 11px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, .02);
+}
+
+.step-index {
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 800;
+  background: #24313c;
+  color: #8ba0b3;
+  flex: none;
+}
+
+.step-body { display: grid; gap: 3px; min-width: 0; }
+.step-body strong { font-size: 12.5px; line-height: 1.3; }
+.step-body em {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: #6f8496;
+}
+.step-body span { font-size: 11.5px; line-height: 1.45; color: #8496a6; }
+
+.step.done .step-index { background: #1d4638; color: #7fdcb6; }
+.step.done strong { color: #b9c8d4; }
+
+.step.current {
+  border-color: #3f8f74;
+  background: rgba(63, 143, 116, .12);
+}
+.step.current .step-index { background: #45a583; color: #041610; }
+.step.current strong { color: #eaf5f0; }
+.step.current .step-body span { color: #a7c0b4; }
+
+.step.todo { opacity: .62; }
+
+.inline-stepper {
+  padding: 0;
+  margin-top: 16px;
+  background: none;
+  border: 0;
+}
+
+.explainer-lead {
+  margin: 14px auto 0;
+  max-width: 66ch;
+  color: #9fb3c8;
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+
+.explainer-note {
+  margin: 16px auto 0;
+  max-width: 66ch;
+  color: #7f909f;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+@media (max-width: 1080px) {
+  .stepper { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .stepper { grid-template-columns: 1fr; }
+  .step.todo { opacity: .75; }
+}

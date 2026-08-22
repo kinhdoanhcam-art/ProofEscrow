@@ -319,3 +319,93 @@ These should only be marked PASS after an actual run on the current deployment/f
 Once `deployContract` or `writeContract` returns a transaction hash, the frontend must **never automatically send the same transaction again** merely because receipt monitoring fails.
 
 Use the existing transaction hash, Explorer/recovery UI, and state refresh instead.
+
+---
+
+## Wallet Connection Fix (Aug 21 steward request)
+
+Steward request:
+
+```text
+Please fix this error Your wallet does not support the GenLayer snap.
+```
+
+### Root cause
+
+The previous round added `src/lib/errors.ts`, which made the message readable —
+but the message was still shown as a **blocking** error, because the connect
+behaviour was unchanged.
+
+`connectWallet()` returned the address only after `client.connect()` had also
+added the network, switched to it, called `wallet_getSnaps`, and installed the
+GenLayer Snap. None of those steps is guarded inside `genlayer-js`. On a wallet
+without Snap support, `wallet_getSnaps` rejects with `-32601` and the whole
+connection failed.
+
+`client.connect()` was additionally called inside **`deployEscrow` and
+`writeEscrow`**, so the same Snap check ran again on every deploy and every
+write — the failure repeated on every action, not just on connect.
+
+The Snap is not required by this app: in `genlayer-js` the snap APIs appear only
+in `connect()` and the `metamaskClient()` diagnostic. Reads use HTTP; writes use
+plain `eth_sendTransaction`.
+
+### Changes
+
+```text
+src/lib/genlayer.ts   ensureStudioChain() - explicit eth_chainId, then
+                          wallet_switchEthereumChain, then wallet_addEthereumChain
+                          on 4902 (GenLayer Studio, chain 61999 / 0xf22f)
+                      connectWallet() returns { address, warning? } and sets the
+                          account as soon as eth_requestAccounts resolves
+                      the Snap install is best-effort and can never block; it is
+                          skipped entirely if the chain step was rejected, so the
+                          user is not re-prompted
+                      deployEscrow / writeEscrow now call ensureStudioChain()
+                          instead of client.connect()
+src/lib/errors.ts     errorCode() reads nested EIP-1193 codes;
+                          -32601 reworded as an optional note;
+                          added -32002 and 4902
+src/App.tsx           handleConnect() consumes { address, warning };
+                          lifecycle stepper with per-step "who does this";
+                          one-sentence explainer for the current status;
+                          wallet-free "how it works" panel on the empty state
+src/styles.css        stepper and explainer styles
+```
+
+### Verified
+
+```text
+npm run build (tsc -b && vite build)               PASS   0 TypeScript errors
+tests/connect.test.mjs - 15 assertions             PASS   0 failed
+```
+
+`tests/connect.test.mjs` drives the real `connectWallet()` against a stubbed
+EIP-1193 provider. Run it with:
+
+```bash
+node tests/build-test-bundle.mjs && node tests/connect.test.mjs
+```
+
+Cases covered:
+
+```text
+wallet_getSnaps rejects -32601  -> connects, account returned, no warning  <-- the steward's case
+wallet_requestSnaps rejected 4001 -> still connects
+wrong chain                     -> switch requested, connects
+chain unknown (4902)            -> add then switch, connects
+network switch rejected         -> account still returned, warning shown,
+                                   Snap step NOT re-prompted
+eth_requestAccounts rejected    -> genuinely throws (this one should fail)
+already on Studio               -> no switch/add/Snap prompts at all
+```
+
+### NOT YET VERIFIED — run in a browser before resubmitting
+
+```text
+[ ] Connect on a wallet with no GenLayer Snap and confirm the app becomes usable
+[ ] Full flow with two wallets: fund -> submit -> snapshot -> adjudicate -> withdraw
+[ ] Vercel VITE_DEFAULT_CONTRACT_ADDRESS still matches the deployed contract
+```
+
+No contract change was made in this round.

@@ -48,6 +48,48 @@ const MAX_SPEC_LENGTH = 2000
 const MAX_URL_LENGTH = 1000
 const RECENT_JOBS_KEY = 'proofEscrow:recentJobs'
 
+/**
+ * The escrow lifecycle in plain language. Drives the stepper so someone who has
+ * never seen this app can tell where a job is and whose turn it is.
+ */
+const LIFECYCLE: Array<{
+  key: string
+  label: string
+  who: string
+  detail: string
+}> = [
+  { key: 'OPEN', label: 'Created', who: 'Client', detail: 'Specification and reward are locked in a new contract.' },
+  { key: 'FUNDED', label: 'Funded', who: 'Client', detail: 'The client deposits the exact reward into escrow.' },
+  { key: 'SUBMITTED', label: 'Work submitted', who: 'Worker', detail: 'The worker submits a public URL as evidence.' },
+  { key: 'SNAPSHOT_COMMITTED', label: 'Evidence snapshot', who: 'Anyone', detail: 'Validators read the evidence and agree on a factual record of it. No verdict yet.' },
+  { key: 'ACCEPTED_RESERVED', label: 'Judged', who: 'Anyone', detail: 'Validators judge that snapshot against the locked spec: accepted or rejected.' },
+  { key: 'PAID', label: 'Settled', who: 'Worker / Client', detail: 'Accepted work is withdrawn by the worker; rejected work is refunded to the client.' },
+]
+
+/** Which lifecycle step a raw contract status belongs to. */
+const STEP_OF: Record<string, number> = {
+  OPEN: 0,
+  FUNDED: 1,
+  SUBMITTED: 2,
+  SNAPSHOT_COMMITTED: 3,
+  ACCEPTED_RESERVED: 4,
+  REJECTED: 4,
+  PAID: 5,
+  REFUNDED: 5,
+}
+
+/** One sentence explaining the current state and whose turn it is. */
+const STATUS_EXPLAINER: Record<string, string> = {
+  OPEN: 'Waiting for the client to deposit the reward into escrow.',
+  FUNDED: 'Escrow is funded. Waiting for the worker to submit a public evidence URL.',
+  SUBMITTED: 'Evidence submitted. Anyone can now ask the validators to record what the evidence actually shows.',
+  SNAPSHOT_COMMITTED: 'The factual snapshot is agreed on-chain. Anyone can now ask the validators for a verdict against the locked specification.',
+  ACCEPTED_RESERVED: 'Accepted. The reward is reserved and the worker can withdraw it.',
+  REJECTED: 'Rejected. The worker may resubmit while attempts remain, or the client may close and take a refund.',
+  PAID: 'Finished — the worker has withdrawn the reward.',
+  REFUNDED: 'Finished — the client has been refunded.',
+}
+
 type RecentJob = {
   address: Address
   title: string
@@ -271,9 +313,17 @@ export default function App() {
 
   async function handleConnect() {
     await guarded('Connecting wallet', async () => {
-      const next = await connectWallet()
+      const { address: next, warning } = await connectWallet()
+
+      // The account is authoritative here. An optional step failing afterwards
+      // must never leave the UI disconnected.
       setAccount(next)
-      setNotice(`Connected ${short(next)}`)
+
+      if (warning) {
+        setNotice(`Connected ${short(next)} — ${warning}`)
+      } else {
+        setNotice(`Connected ${short(next)}`)
+      }
     })
   }
 
@@ -716,6 +766,9 @@ export default function App() {
                   </div>
                   <h2>{job.summary.title}</h2>
                   <p className="spec">{job.specification}</p>
+                  {STATUS_EXPLAINER[status] && (
+                    <p className="status-explainer">{STATUS_EXPLAINER[status]}</p>
+                  )}
                 </div>
 
                 <div className="money">
@@ -723,6 +776,30 @@ export default function App() {
                   <strong>{gen(job.financials.reward_wei)}</strong>
                 </div>
               </section>
+
+              <ol className="stepper card" aria-label="Escrow lifecycle">
+                {LIFECYCLE.map((step, index) => {
+                  const current = STEP_OF[status] ?? 0
+                  const state =
+                    index < current ? 'done' : index === current ? 'current' : 'todo'
+                  const label =
+                    step.key === 'ACCEPTED_RESERVED' && status === 'REJECTED'
+                      ? 'Judged — rejected'
+                      : step.key === 'PAID' && status === 'REFUNDED'
+                        ? 'Settled — refunded'
+                        : step.label
+                  return (
+                    <li key={step.key} className={`step ${state}`}>
+                      <span className="step-index">{index + 1}</span>
+                      <span className="step-body">
+                        <strong>{label}</strong>
+                        <em>{step.who}</em>
+                        <span>{step.detail}</span>
+                      </span>
+                    </li>
+                  )
+                })}
+              </ol>
 
               <section className="grid three">
                 <article className="metric card">
@@ -957,6 +1034,32 @@ export default function App() {
               <p>
                 Each ProofEscrow contract represents one client-worker
                 agreement with a locked specification and native GEN reward.
+              </p>
+              <p className="explainer-lead">
+                A client locks a written specification and deposits the reward. A
+                worker submits a public URL as evidence. GenLayer validators then
+                do two separate things — first they agree on a factual record of
+                what the evidence actually shows, and only then do they judge that
+                record against the locked specification. The contract holds and
+                releases the money; the validators never touch it.
+              </p>
+              <ol className="stepper inline-stepper">
+                {LIFECYCLE.map((step, index) => (
+                  <li key={step.key} className="step todo">
+                    <span className="step-index">{index + 1}</span>
+                    <span className="step-body">
+                      <strong>{step.label}</strong>
+                      <em>{step.who}</em>
+                      <span>{step.detail}</span>
+                    </span>
+                  </li>
+                ))}
+              </ol>
+              <p className="explainer-note">
+                Reading an escrow needs no wallet. Paste any ProofEscrow address
+                above to inspect it. Funding, submitting and settling need a
+                wallet on GenLayer Studio — and the client and worker must be two
+                different wallets.
               </p>
             </section>
           )}
