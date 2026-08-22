@@ -283,6 +283,12 @@ PASS  Error toast can be dismissed
 PASS  WORKER role badge
 PASS  Client-only Fund button disabled for Worker
 PASS  Disabled-action explanation
+PASS  Browser wallet connection after Snap fix
+PASS  Create + fund fresh 1 GEN escrow with two accessible wallets
+PASS  Worker submit_deliverable
+PASS  commit_reviewed_snapshot -> SNAPSHOT_COMMITTED
+PASS  adjudicate -> ACCEPTED with 1 GEN reserved / 1 GEN pending payout
+PASS  Worker withdraw -> Settled / 0 GEN pool / 0 GEN reserved / 0 GEN pending
 ```
 
 ## Not Yet Re-Verified in This Browser Run
@@ -296,13 +302,6 @@ The following are intentionally **not** marked PASS:
 - long-error scroll behavior under an oversized provider/RPC message
 - title 160-character stress test
 - evidence URL 1000-character stress test
-- full funded settlement path:
-  fund
-  → submit_deliverable
-  → commit_reviewed_snapshot
-  → adjudicate
-  → withdraw
-
 - rejected/refund path:
   fund
   → submit_deliverable
@@ -400,12 +399,35 @@ eth_requestAccounts rejected    -> genuinely throws (this one should fail)
 already on Studio               -> no switch/add/Snap prompts at all
 ```
 
-### NOT YET VERIFIED — run in a browser before resubmitting
+### Browser verification — Aug 22, 2026
+
+Actually verified on the deployed Vercel frontend (`proof-escrow-bay.vercel.app`):
 
 ```text
-[ ] Connect on a wallet with no GenLayer Snap and confirm the app becomes usable
-[ ] Full flow with two wallets: fund -> submit -> snapshot -> adjudicate -> withdraw
-[ ] Vercel VITE_DEFAULT_CONTRACT_ADDRESS still matches the deployed contract
+PASS  Wallet connection is no longer blocked by the GenLayer Snap error
+PASS  Fresh escrow created with two accessible MetaMask wallets
+PASS  Client funded the fresh escrow with 1 GEN
+PASS  Worker submitted public evidence
+PASS  Consensus snapshot committed -> SNAPSHOT_COMMITTED
+PASS  Adjudication -> ACCEPTED
+PASS  Accounting after ACCEPTED: pool 1 GEN / reserved 1 GEN / pending payout 1 GEN
+PASS  Worker withdrew 1 GEN
+PASS  Final state: Settled / pool 0 GEN / reserved 0 GEN / pending payout 0 GEN
+PASS  Vercel loaded the same deployed contract address used as submission evidence
 ```
+
+Verified happy-path lifecycle:
+
+```text
+Create Job
+-> Fund
+-> Submit Deliverable
+-> Build Consensus Snapshot
+-> Adjudicate Deliverable (ACCEPTED)
+-> Withdraw 1 GEN
+-> Settled
+```
+
+The rejected/refund branch was not re-run in this browser verification and remains listed above as not yet re-verified.
 
 No contract change was made in this round.
