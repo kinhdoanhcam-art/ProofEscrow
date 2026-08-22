@@ -131,7 +131,24 @@ PASS  Error toast could be closed with ×
 PASS  WORKER role badge rendered for the Worker wallet
 PASS  Client-only Fund action stayed visible but disabled for Worker
 PASS  Disabled action displayed: "Only the client may fund."
+PASS  Wallet connection works without requiring the GenLayer Snap
+PASS  Fresh two-wallet escrow created and funded with 1 GEN
+PASS  Worker submitted a public evidence URL
+PASS  Consensus snapshot committed -> SNAPSHOT_COMMITTED
+PASS  Adjudication -> ACCEPTED
+PASS  Accounting after ACCEPTED: pool 1 GEN / reserved 1 GEN / pending payout 1 GEN
+PASS  Worker withdrew 1 GEN
+PASS  Final state -> Settled / pool 0 GEN / reserved 0 GEN / pending payout 0 GEN
 ```
+
+Fresh browser-test escrow instance:
+
+```text
+0x9d829aF09870Fc4597983E4b0e6AFBBB0ce9B396
+```
+
+ProofEscrow deploys a new contract instance for each job. The address above is the fresh
+instance created through the live dApp for the end-to-end browser verification.
 
 Not claimed as browser-verified in this re-test:
 
@@ -139,16 +156,20 @@ Not claimed as browser-verified in this re-test:
 - manual recovery after an intentionally forced receipt-monitoring failure
 - informational toast auto-dismiss timing
 - long-error scrolling under an intentionally oversized RPC error
-- full fund → submit → snapshot → adjudicate → withdraw/refund settlement flow
+- rejected/refund settlement branch
 ```
 
 See [`TESTING.md`](./TESTING.md) for the exact observed test record.
 
-## Current Deployment
+## Reference Deployment
 
 ```text
 0xdD4ecd08d0F23E504b2Bdd6bD1150a5d3C630436
 ```
+
+This is the reference/default ProofEscrow deployment used in the submission documentation.
+Because the dApp deploys one ProofEscrow contract per job, the fresh browser-test instance
+recorded above has a different address.
 
 Explorer:
 

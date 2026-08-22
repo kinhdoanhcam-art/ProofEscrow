@@ -401,7 +401,22 @@ already on Studio               -> no switch/add/Snap prompts at all
 
 ### Browser verification — Aug 22, 2026
 
-Actually verified on the deployed Vercel frontend (`proof-escrow-bay.vercel.app`):
+Actually verified on the deployed Vercel frontend (`proof-escrow-bay.vercel.app`).
+
+Reference/default submission deployment:
+
+```text
+0xdD4ecd08d0F23E504b2Bdd6bD1150a5d3C630436
+```
+
+Fresh browser-test escrow instance created through the live dApp:
+
+```text
+0x9d829aF09870Fc4597983E4b0e6AFBBB0ce9B396
+```
+
+ProofEscrow deploys a new contract instance for each job, so the end-to-end test instance
+is intentionally different from the reference/default submission deployment.
 
 ```text
 PASS  Wallet connection is no longer blocked by the GenLayer Snap error
@@ -413,7 +428,6 @@ PASS  Adjudication -> ACCEPTED
 PASS  Accounting after ACCEPTED: pool 1 GEN / reserved 1 GEN / pending payout 1 GEN
 PASS  Worker withdrew 1 GEN
 PASS  Final state: Settled / pool 0 GEN / reserved 0 GEN / pending payout 0 GEN
-PASS  Vercel loaded the same deployed contract address used as submission evidence
 ```
 
 Verified happy-path lifecycle:
