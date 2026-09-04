@@ -171,7 +171,7 @@ The V2 source in this repository was exercised on fresh StudioNet deployments wi
   reward: 1 GEN; final pool/reserved/pending payout: 0 / 0 / 0
 ```
 
-The frontend defaults to the final paid V2 instance `0x3ADEDD82008Fd54a0eB9DAA9477743B2b8851008`. Other V2 evidence addresses can still be opened directly from the dashboard.
+The frontend defaults to the final paid V2 instance `0x3ADEDD82008Fd54a0eB9DAA9477743B2b8851008`. Other V2 evidence addresses can still be opened directly from the dashboard. A stale `VITE_DEFAULT_CONTRACT_ADDRESS` pointing at either historical V1 deployment is ignored automatically, so an old Vercel environment value cannot silently become the production default.
 
 ## Historical V1 deployments
 
@@ -195,7 +195,7 @@ Local/static gates currently completed:
 
 ```text
 PASS  Python syntax compilation for contracts/ProofEscrow.py
-PASS  V2 structural contract/UI checks (22/22)
+PASS  V2 structural contract/UI checks (24/24)
 PASS  TypeScript syntax transpilation for App.tsx / genlayer.ts / config.ts
 ```
 

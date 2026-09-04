@@ -264,6 +264,7 @@ After the V2 source is deployed and its new address is configured in the fronten
 - `#/create` renders a dedicated creation page.
 - both deadline inputs are visible and validated.
 - `#/dashboard` loads a V2 address without showing V1 state.
+- stale `VITE_DEFAULT_CONTRACT_ADDRESS` values matching either historical V1 deployment are rejected and the final paid V2 address is used instead.
 - Client and Worker addresses are truncated and copyable.
 - deadline cards show absolute time plus workflow-aware state: active overdue gates are red, completed/resolved milestones are not falsely marked expired after settlement.
 - timeout cancellation is disabled before the relevant cutoff.
