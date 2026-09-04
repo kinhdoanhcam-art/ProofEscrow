@@ -142,7 +142,7 @@ The redesign includes:
 - modern dark-mode surfaces and high-contrast status cards;
 - dedicated landing, creation, and dashboard experiences;
 - explicit date/time inputs for both deadlines;
-- live deadline state on the dashboard;
+- workflow-aware deadline state on the dashboard: completed/resolved milestones stay neutral/green instead of turning into false red expiry warnings after settlement;
 - stall-protection panel for timeout cancellation and 2-of-2 mutual close;
 - compact address truncation with copy controls;
 - responsive desktop/tablet/mobile layouts;
@@ -195,7 +195,7 @@ Local/static gates currently completed:
 
 ```text
 PASS  Python syntax compilation for contracts/ProofEscrow.py
-PASS  V2 structural contract/UI checks (20/20)
+PASS  V2 structural contract/UI checks (22/22)
 PASS  TypeScript syntax transpilation for App.tsx / genlayer.ts / config.ts
 ```
 
@@ -205,7 +205,7 @@ The contract source SHA-256 for this package is:
 73b87f672cee35e7a9d08328ddad7f89767bfbbb04fc9aa1be479e472c85dfa8
 ```
 
-Fresh StudioNet runtime verification is **PASS** for timeout cancellation, 2-of-2 mutual close, negative adjudication, accepted reservation, and permissionless payout release. The final Vercel production UI check is still pending. See [`TESTING.md`](./TESTING.md).
+Fresh StudioNet runtime verification is **PASS** for timeout cancellation, 2-of-2 mutual close, negative adjudication, accepted reservation, and permissionless payout release. Production Vercel verification also confirmed the dedicated landing, create, and paid-dashboard routes against the final V2 instance. Deadline cards are workflow-aware: completed submission/adjudication milestones no longer become red merely because wall-clock time later passes their original cutoffs, while real timeout exits remain explicitly highlighted. See [`TESTING.md`](./TESTING.md).
 
 ## Commands
 

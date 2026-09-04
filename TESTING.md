@@ -265,12 +265,15 @@ After the V2 source is deployed and its new address is configured in the fronten
 - both deadline inputs are visible and validated.
 - `#/dashboard` loads a V2 address without showing V1 state.
 - Client and Worker addresses are truncated and copyable.
-- deadline cards show absolute time plus remaining/expired state.
+- deadline cards show absolute time plus workflow-aware state: active overdue gates are red, completed/resolved milestones are not falsely marked expired after settlement.
 - timeout cancellation is disabled before the relevant cutoff.
 - mutual-close approvals visibly reflect on-chain Client/Worker flags.
 - terminal resolution reason is visible after timeout or mutual close.
 - desktop and 390px mobile layouts do not horizontally overflow.
 - no browser console errors during load/read/write flows.
+
+
+Production desktop verification completed on Vercel for the landing page, create page, and final paid dashboard (`0x3ADEDD82008Fd54a0eB9DAA9477743B2b8851008`). The paid dashboard showed `PAID`, 1 GEN reward, and zero pool/reserved/pending payout.
 
 ## Historical addresses
 
