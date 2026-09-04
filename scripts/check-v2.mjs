@@ -30,6 +30,8 @@ check('create page collects submission deadline', app.includes('Submission deadl
 check('create page collects adjudication deadline', app.includes('Adjudication deadline'))
 check('dashboard exposes deadline cancellation', app.includes('Cancel after deadline'))
 check('dashboard exposes mutual close', app.includes('Approve mutual close'))
+check('terminal deadline cards avoid false expired warnings', app.includes("Adjudication completed · payout released") && app.includes("Submission completed"))
+check('timeout deadline cards remain explicit', app.includes("timeout exit triggered"))
 check('dashboard truncates addresses', app.includes('<AddressValue value={job.summary.client}'))
 check('legacy reference address is not the default', !config.includes('0xdD4ecd08d0F23E504b2Bdd6bD1150a5d3C630436'))
 
