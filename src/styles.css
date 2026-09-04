@@ -115,10 +115,12 @@ input::placeholder, textarea::placeholder { color: #526078; }
 .deadline-panel { display: grid; align-content: start; }
 .deadline-card { padding: 16px; border: 1px solid #1e3449; border-radius: 13px; background: #0a1521; margin-bottom: 10px; }
 .deadline-card.expired { border-color: #5e2c35; background: #1b1015; }
+.deadline-card.complete { border-color: #244b3c; background: #0b1e18; }
 .deadline-card span { display: block; color: #6d7f97; font-size: 10px; text-transform: uppercase; letter-spacing: .13em; }
 .deadline-card strong { display: block; margin: 7px 0 5px; font-size: 14px; }
 .deadline-card em { color: #6fd6ff; font-size: 12px; font-style: normal; }
 .deadline-card.expired em { color: #ff9eae; }
+.deadline-card.complete em { color: #86e9ba; }
 .action-panel, .exit-panel { display: flex; flex-direction: column; gap: 11px; }
 .hint { margin: 0; color: #e2b66d; font-size: 12px; }
 .exit-option { display: grid; gap: 11px; padding: 16px; border: 1px solid #1d2a3d; border-radius: 13px; background: #080e18; }

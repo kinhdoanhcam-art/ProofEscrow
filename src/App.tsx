@@ -191,6 +191,47 @@ export default function App() {
 
   const submissionPassed = !!job && Math.floor(Date.now() / 1000) >= Number(job.summary.submission_deadline_unix)
   const adjudicationPassed = !!job && Math.floor(Date.now() / 1000) >= Number(job.summary.adjudication_deadline_unix)
+
+  const submissionDeadlineState = (() => {
+    if (!job) return { className: '', copy: '—' }
+    if (status === 'CANCELLED_TIMEOUT' && !job.summary.submitted_at) {
+      return { className: 'expired', copy: 'Submission deadline elapsed · timeout exit triggered' }
+    }
+    if (status === 'MUTUALLY_CLOSED') {
+      return { className: 'complete', copy: 'Escrow resolved by mutual close' }
+    }
+    if (['SUBMITTED', 'SNAPSHOT_COMMITTED', 'ACCEPTED_RESERVED', 'REJECTED', 'PAID', 'REFUNDED', 'CANCELLED_TIMEOUT'].includes(status)) {
+      return { className: 'complete', copy: 'Submission completed' }
+    }
+    return {
+      className: submissionPassed ? 'expired' : '',
+      copy: remaining(unixToIso(job.summary.submission_deadline_unix)),
+    }
+  })()
+
+  const adjudicationDeadlineState = (() => {
+    if (!job) return { className: '', copy: '—' }
+    if (status === 'CANCELLED_TIMEOUT' && job.summary.submitted_at) {
+      return { className: 'expired', copy: 'Adjudication deadline elapsed · timeout exit triggered' }
+    }
+    if (status === 'MUTUALLY_CLOSED') {
+      return { className: 'complete', copy: 'Escrow resolved by mutual close' }
+    }
+    if (status === 'PAID') {
+      return { className: 'complete', copy: 'Adjudication completed · payout released' }
+    }
+    if (status === 'REFUNDED') {
+      return { className: 'complete', copy: 'Adjudication completed · Client refunded' }
+    }
+    if (status === 'ACCEPTED_RESERVED') {
+      return { className: 'complete', copy: 'Adjudication completed · payout reserved' }
+    }
+    return {
+      className: adjudicationPassed ? 'expired' : '',
+      copy: remaining(unixToIso(job.summary.adjudication_deadline_unix)),
+    }
+  })()
+
   const timeoutAvailable = !!job && (
     (status === 'FUNDED' && submissionPassed) ||
     (['SUBMITTED', 'SNAPSHOT_COMMITTED', 'REJECTED'].includes(status) && adjudicationPassed)
@@ -588,8 +629,8 @@ export default function App() {
 
                 <section className="panel deadline-panel">
                   <div className="section-head"><div><span className="kicker">DEADLINES</span><h3>Locked timeout schedule</h3></div></div>
-                  <div className={`deadline-card ${submissionPassed ? 'expired' : ''}`}><span>Submission deadline</span><strong>{formatDate(unixToIso(job.summary.submission_deadline_unix))}</strong><em>{remaining(unixToIso(job.summary.submission_deadline_unix))}</em></div>
-                  <div className={`deadline-card ${adjudicationPassed ? 'expired' : ''}`}><span>Adjudication deadline</span><strong>{formatDate(unixToIso(job.summary.adjudication_deadline_unix))}</strong><em>{remaining(unixToIso(job.summary.adjudication_deadline_unix))}</em></div>
+                  <div className={`deadline-card ${submissionDeadlineState.className}`}><span>Submission deadline</span><strong>{formatDate(unixToIso(job.summary.submission_deadline_unix))}</strong><em>{submissionDeadlineState.copy}</em></div>
+                  <div className={`deadline-card ${adjudicationDeadlineState.className}`}><span>Adjudication deadline</span><strong>{formatDate(unixToIso(job.summary.adjudication_deadline_unix))}</strong><em>{adjudicationDeadlineState.copy}</em></div>
                 </section>
               </div>
 
