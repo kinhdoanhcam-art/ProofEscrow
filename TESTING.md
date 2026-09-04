@@ -1,447 +1,286 @@
-# ProofEscrow — Testing
+# ProofEscrow V2 — Testing
 
-## Current Deployment
+## Status
 
-**Network:** GenLayer StudioNet
+V2 modifies the Intelligent Contract, so historical V1 addresses are not valid runtime evidence. Fresh V2 StudioNet runtime verification has now been completed on the addresses documented below.
 
-**Contract**
+Current source SHA-256:
 
 ```text
-0xdD4ecd08d0F23E504b2Bdd6bD1150a5d3C630436
+73b87f672cee35e7a9d08328ddad7f89767bfbbb04fc9aa1be479e472c85dfa8
 ```
 
-**Explorer**
+## Local/static gates
 
-https://explorer-studio.genlayer.com/address/0xdD4ecd08d0F23E504b2Bdd6bD1150a5d3C630436
-
-**Live App**
-
-https://proof-escrow-bay.vercel.app/
-
-**GitHub**
-
-https://github.com/kinhdoanhcam-art/ProofEscrow
-
-## Scope of This Re-Test
-
-The steward-feedback fix is frontend/docs only. `contracts/ProofEscrow.py` and the deployed base contract address above were not changed for this fix.
-
-The browser tests below record only what was actually observed after the updated frontend was deployed.
-
----
-
-## Build — PASS
-
-Command:
+Run:
 
 ```bash
+python -m py_compile contracts/ProofEscrow.py
+npm run test:v2
+npm run test:wallet
 npm run build
 ```
 
-Observed:
+Observed in the package-preparation environment:
 
 ```text
-vite v6.4.3 building for production...
-476 modules transformed.
-built in 3.40s
+PASS  python -m py_compile contracts/ProofEscrow.py
+PASS  npm run test:v2 — 20 checks, 0 failed
+PASS  TypeScript syntax transpilation for App.tsx, genlayer.ts, config.ts
 ```
 
-Result:
+A production build should be re-run in the final dependency-installed checkout before Vercel deployment. Runtime contract verification below is independent of that frontend build gate.
+
+## Steward request coverage
+
+The requested behavior is covered by these V2 paths:
+
+| Steward concern | V2 contract behavior |
+| --- | --- |
+| Explicit submission deadline | `submission_deadline_unix` locked in constructor; funding/first submission blocked after cutoff |
+| Explicit adjudication deadline | `adjudication_deadline_unix` locked in constructor; snapshot/adjudication/resubmission blocked after cutoff |
+| Funded GEN stuck before submission | `cancel_after_deadline()` from `FUNDED` after submission deadline |
+| Funded GEN stuck during review | `cancel_after_deadline()` from `SUBMITTED` / `SNAPSHOT_COMMITTED` after adjudication deadline |
+| Cooperative cancellation | `approve_mutual_close()` with Client + Worker on-chain approval |
+| Worker disappears after accepted verdict | `release_reserved_payout()` permissionlessly sends only to immutable Worker |
+| UI clarity | dedicated landing/create/dashboard routes, dark cards, deadline cards, truncated addresses, responsive layout |
+
+## Fresh StudioNet runtime matrix
+
+Use at least two wallets:
 
 ```text
-PASS
+Wallet 1 = Client / deployer
+Wallet 2 = Worker
 ```
 
-The chunk-size message was a Vite optimization warning, not a build failure.
+A third observer wallet is useful for the permissionless payout-release test.
 
----
+### A. Deployment/config
 
-## Test 1 — Create Job — PASS
-
-Client wallet:
+Deploy `contracts/ProofEscrow.py` with:
 
 ```text
-0x3065E31B1D993d7C0D59E6786844cBa56780B2d3
+title
+specification
+worker
+reward_wei
+max_attempts
+submission_deadline_unix
+adjudication_deadline_unix
 ```
 
-Worker wallet:
+Required constructor relationship:
 
 ```text
-0x5a52d040581A76e2C032542855D31480f2ea7097
+now < submission_deadline_unix < adjudication_deadline_unix
 ```
 
-Input:
+Then call:
 
 ```text
-Job title:
-Landing Page Design
-
-Locked acceptance specification:
-Worker must deliver a responsive landing page with desktop and mobile layouts, source files, and a public preview link.
-
-Reward:
-5 GEN
-
-Max submission attempts:
-2
+get_config()
+get_deadlines()
+get_job_summary()
 ```
 
-Observed after wallet confirmation:
+Expected config flags:
 
 ```text
-status: OPEN
-reward: 5 GEN
-attempt: 0/2
-role: CLIENT
-pool: 0 GEN
-reserved: 0 GEN
-pending payout: 0 GEN
+version = 2.0
+explicit_submission_deadline = true
+explicit_adjudication_deadline = true
+deadline_cancellation = true
+mutual_close = true
+permissionless_reserved_release = true
 ```
 
-The new escrow loaded into the app successfully and appeared in `Your recent escrows`.
+### B. Pre-deadline timeout guard
 
-Result:
+After funding, call `cancel_after_deadline()` before the submission deadline.
+
+Expected:
 
 ```text
-PASS
+ERROR: Submission deadline has not passed
 ```
 
-This directly verifies that the steward's original Create Job flow no longer ends in `[object Object]` on the successful path.
+This proves the timeout path cannot be used early.
 
----
+### C. Mutual-close path
 
-## Test 2 — Reject MetaMask Request — PASS
+On a funded test escrow before either deadline:
 
-Input:
+1. Client calls `approve_mutual_close()`.
+2. `get_close_state()` shows Client approved, Worker not approved, status still `FUNDED`.
+3. Worker calls `approve_mutual_close()`.
+4. Expected terminal state:
 
 ```text
-Job title:
-Reject Test
-
-Specification:
-This is a temporary test job used only to verify wallet rejection handling.
-
-Reward:
-1 GEN
-
-Max submission attempts:
-1
+status = MUTUALLY_CLOSED
+pool = 0
+reserved = 0
+pending_payout = 0
 ```
 
-Action:
+The pooled GEN must return to the Client.
+
+### D. Submission-timeout path
+
+Use a separate short-deadline test escrow:
+
+1. Client funds before submission deadline.
+2. Worker does not submit.
+3. After the submission deadline, Client or Worker calls `cancel_after_deadline()`.
+4. Expected:
 
 ```text
-Deploy Escrow
-→ Reject transaction signature in MetaMask
+status = CANCELLED_TIMEOUT
+pool = 0
+resolution_reason = Submission deadline elapsed before a deliverable was submitted
 ```
 
-Observed user-facing error:
+### E. Normal accepted settlement
+
+Use a normal-deadline escrow:
 
 ```text
-User rejected the request.
-Details: MetaMask Tx Signature:
-User denied transaction signature.
-Version: viem@2.55.13
+OPEN -> fund -> FUNDED
+FUNDED -> submit_deliverable -> SUBMITTED
+SUBMITTED -> commit_reviewed_snapshot -> SNAPSHOT_COMMITTED
+SNAPSHOT_COMMITTED -> adjudicate -> ACCEPTED_RESERVED
 ```
 
-Important result:
+After `ACCEPTED_RESERVED`, use an Observer or Client wallet to call:
 
 ```text
-[object Object]
+release_reserved_payout()
 ```
 
-was **not** displayed.
-
-Result:
+Expected:
 
 ```text
-PASS
+status = PAID
+pool = 0
+reserved = 0
+pending_payout = 0
 ```
 
-Note: the current message is functionally correct but still includes viem detail text. This is acceptable for the steward fix; future polish could keep only the friendly sentence in the toast and leave raw detail in the console.
+This proves accepted funds do not require the Worker to return merely to trigger settlement.
 
----
+### F. Rejected/refund path
 
-## Test 3 — Specification Length Guard — PASS
+If adjudication returns `REJECTED`, verify:
 
-A clipboard string of 2101 characters was pasted into:
+- Client may call `refund()` immediately; or
+- Worker may resubmit while attempts remain and before adjudication deadline.
+
+Expected refund terminal state:
 
 ```text
-Locked acceptance specification
+status = REFUNDED
+pool = 0
 ```
 
-Observed counter:
+### G. Adjudication-timeout path
+
+Use a separate escrow whose Worker submits before the submission deadline but whose workflow is intentionally left in `SUBMITTED` or `SNAPSHOT_COMMITTED` until the adjudication deadline passes.
+
+Then Client or Worker calls:
 
 ```text
-2000 / 2000
+cancel_after_deadline()
 ```
 
-The field did not accept content beyond the contract limit.
-
-Result:
+Expected:
 
 ```text
-PASS
+status = CANCELLED_TIMEOUT
+pool = 0
+resolution_reason = Adjudication deadline elapsed before final settlement
 ```
 
-This verifies the frontend guard for `MAX_SPEC_LENGTH = 2000`.
+## Observed StudioNet runtime results
 
-Title and evidence URL limits are implemented in the UI, but were not separately stress-tested in this browser run, so they are not marked PASS here.
-
----
-
-## Test 4 — Error Toast Dismissal — PASS
-
-A MetaMask rejection was triggered to display an error toast.
-
-Observed:
-
-- error toast rendered in the lower-right area;
-- toast showed a visible `×` close control;
-- clicking `×` removed the toast immediately;
-- the page did not reload;
-- form contents remained intact.
-
-Result:
+Wallet roles used for the verified runs:
 
 ```text
-PASS
+Client / deployer: 0x3065E31B1D993d7C0D59E6786844cBa56780B2d3
+Worker:            0xdaE8968571C6E84f44F86d06F1071bbc8F807500
 ```
 
-Long-error scrolling and informational auto-dismiss timing were not intentionally stress-tested in this run.
+| Address | Verified path | Final state | Result |
+| --- | --- | --- | --- |
+| `0xC09951A1a09BE682E72844CAf9AB9903E5921929` | Worker submitted, workflow intentionally stalled past adjudication deadline, then `cancel_after_deadline()` | `CANCELLED_TIMEOUT` | PASS |
+| `0xBf3F249487C63155f094D0e5348115dce06E8D73` | Client approval then Worker approval via `approve_mutual_close()` | `MUTUALLY_CLOSED` | PASS |
+| `0x67Be788c86Ef9f224C940434b413709B287Ec04C` | Evidence did not fully satisfy immutable specification | `REJECTED` | PASS negative case |
+| `0x3ADEDD82008Fd54a0eB9DAA9477743B2b8851008` | Fund 1 GEN -> submit -> snapshot -> adjudicate -> `ACCEPTED_RESERVED`; Client triggers `release_reserved_payout()` | `PAID` | PASS |
 
----
-
-## Test 5 — Worker Role UX — PASS
-
-The connected wallet was changed to the Worker:
+Observed financial state immediately before the final payout-release call on `0x3ADE...1008`:
 
 ```text
-0x5a52d040581A76e2C032542855D31480f2ea7097
+pool_wei = 1000000000000000000
+reserved_wei = 1000000000000000000
+pending_payout_wei = 1000000000000000000
 ```
 
-The `Landing Page Design` escrow was opened.
-
-Observed:
+Observed after the **Client**, not the Worker, called `release_reserved_payout()`:
 
 ```text
-role badge: WORKER
-status: OPEN
-reward: 5 GEN
+status = PAID
+resolution_reason = Accepted payout released to Worker
+pool_wei = 0
+reserved_wei = 0
+pending_payout_wei = 0
 ```
 
-The Client-only action remained visible:
+This proves the settlement trigger is permissionless while the immutable payout recipient remains the Worker.
+
+### Timeout guard detail
+
+The timeout instance recorded:
 
 ```text
-Fund 5 GEN
+status = CANCELLED_TIMEOUT
+resolution_reason = Adjudication deadline elapsed before final settlement
 ```
 
-but was disabled.
+### Mutual-close detail
 
-The UI displayed the reason:
+The mutual-close instance recorded:
 
 ```text
-Only the client may fund.
+status = MUTUALLY_CLOSED
+resolution_reason = Client and Worker mutually approved escrow closure
 ```
 
-Result:
+The per-party approval flags reset after terminal settlement by design; the terminal state and resolution reason are the durable closure evidence.
+
+## Production UI checklist
+
+After the V2 source is deployed and its new address is configured in the frontend:
+
+- `#/` renders the landing page.
+- `#/create` renders a dedicated creation page.
+- both deadline inputs are visible and validated.
+- `#/dashboard` loads a V2 address without showing V1 state.
+- Client and Worker addresses are truncated and copyable.
+- deadline cards show absolute time plus remaining/expired state.
+- timeout cancellation is disabled before the relevant cutoff.
+- mutual-close approvals visibly reflect on-chain Client/Worker flags.
+- terminal resolution reason is visible after timeout or mutual close.
+- desktop and 390px mobile layouts do not horizontally overflow.
+- no browser console errors during load/read/write flows.
+
+## Historical addresses
+
+Do not use these as V2 evidence:
 
 ```text
-PASS
+0xdD4ecd08d0F23E504b2Bdd6bD1150a5d3C630436  # old reference deployment
+0x9d829aF09870Fc4597983E4b0e6AFBBB0ce9B396  # old browser-test instance
 ```
 
-This verifies the new role badge and disabled-with-reason behavior.
+## Evidence discipline
 
----
-
-## Recent Escrows — Observed
-
-After creating `Landing Page Design`, the app displayed it in:
-
-```text
-Your recent escrows
-```
-
-alongside the previously known escrow.
-
-This confirms the recent-job UI rendered the newly created escrow during this browser session.
-
-A separate browser/session persistence test was not performed, so cross-session persistence is not separately claimed.
-
----
-
-## Verified Summary
-
-```text
-PASS  npm run build
-PASS  Create Job
-PASS  Created escrow loaded successfully
-PASS  Newly created escrow shown in Recent Escrows
-PASS  MetaMask rejection no longer shows [object Object]
-PASS  2000-character specification limit
-PASS  Error toast can be dismissed
-PASS  WORKER role badge
-PASS  Client-only Fund button disabled for Worker
-PASS  Disabled-action explanation
-PASS  Browser wallet connection after Snap fix
-PASS  Create + fund fresh 1 GEN escrow with two accessible wallets
-PASS  Worker submit_deliverable
-PASS  commit_reviewed_snapshot -> SNAPSHOT_COMMITTED
-PASS  adjudicate -> ACCEPTED with 1 GEN reserved / 1 GEN pending payout
-PASS  Worker withdraw -> Settled / 0 GEN pool / 0 GEN reserved / 0 GEN pending
-```
-
-## Not Yet Re-Verified in This Browser Run
-
-The following are intentionally **not** marked PASS:
-
-```text
-- forced submitted-but-unconfirmed deployment recovery
-- manual address recovery after deliberately failing receipt monitoring
-- informational toast auto-dismiss timing
-- long-error scroll behavior under an oversized provider/RPC message
-- title 160-character stress test
-- evidence URL 1000-character stress test
-- rejected/refund path:
-  fund
-  → submit_deliverable
-  → commit_reviewed_snapshot
-  → adjudicate
-  → REJECTED
-  → refund
-```
-
-These should only be marked PASS after an actual run on the current deployment/frontend.
-
-## RPC Safety Rule
-
-Once `deployContract` or `writeContract` returns a transaction hash, the frontend must **never automatically send the same transaction again** merely because receipt monitoring fails.
-
-Use the existing transaction hash, Explorer/recovery UI, and state refresh instead.
-
----
-
-## Wallet Connection Fix (Aug 21 steward request)
-
-Steward request:
-
-```text
-Please fix this error Your wallet does not support the GenLayer snap.
-```
-
-### Root cause
-
-The previous round added `src/lib/errors.ts`, which made the message readable —
-but the message was still shown as a **blocking** error, because the connect
-behaviour was unchanged.
-
-`connectWallet()` returned the address only after `client.connect()` had also
-added the network, switched to it, called `wallet_getSnaps`, and installed the
-GenLayer Snap. None of those steps is guarded inside `genlayer-js`. On a wallet
-without Snap support, `wallet_getSnaps` rejects with `-32601` and the whole
-connection failed.
-
-`client.connect()` was additionally called inside **`deployEscrow` and
-`writeEscrow`**, so the same Snap check ran again on every deploy and every
-write — the failure repeated on every action, not just on connect.
-
-The Snap is not required by this app: in `genlayer-js` the snap APIs appear only
-in `connect()` and the `metamaskClient()` diagnostic. Reads use HTTP; writes use
-plain `eth_sendTransaction`.
-
-### Changes
-
-```text
-src/lib/genlayer.ts   ensureStudioChain() - explicit eth_chainId, then
-                          wallet_switchEthereumChain, then wallet_addEthereumChain
-                          on 4902 (GenLayer Studio, chain 61999 / 0xf22f)
-                      connectWallet() returns { address, warning? } and sets the
-                          account as soon as eth_requestAccounts resolves
-                      the Snap install is best-effort and can never block; it is
-                          skipped entirely if the chain step was rejected, so the
-                          user is not re-prompted
-                      deployEscrow / writeEscrow now call ensureStudioChain()
-                          instead of client.connect()
-src/lib/errors.ts     errorCode() reads nested EIP-1193 codes;
-                          -32601 reworded as an optional note;
-                          added -32002 and 4902
-src/App.tsx           handleConnect() consumes { address, warning };
-                          lifecycle stepper with per-step "who does this";
-                          one-sentence explainer for the current status;
-                          wallet-free "how it works" panel on the empty state
-src/styles.css        stepper and explainer styles
-```
-
-### Verified
-
-```text
-npm run build (tsc -b && vite build)               PASS   0 TypeScript errors
-tests/connect.test.mjs - 15 assertions             PASS   0 failed
-```
-
-`tests/connect.test.mjs` drives the real `connectWallet()` against a stubbed
-EIP-1193 provider. Run it with:
-
-```bash
-node tests/build-test-bundle.mjs && node tests/connect.test.mjs
-```
-
-Cases covered:
-
-```text
-wallet_getSnaps rejects -32601  -> connects, account returned, no warning  <-- the steward's case
-wallet_requestSnaps rejected 4001 -> still connects
-wrong chain                     -> switch requested, connects
-chain unknown (4902)            -> add then switch, connects
-network switch rejected         -> account still returned, warning shown,
-                                   Snap step NOT re-prompted
-eth_requestAccounts rejected    -> genuinely throws (this one should fail)
-already on Studio               -> no switch/add/Snap prompts at all
-```
-
-### Browser verification — Aug 22, 2026
-
-Actually verified on the deployed Vercel frontend (`proof-escrow-bay.vercel.app`).
-
-Reference/default submission deployment:
-
-```text
-0xdD4ecd08d0F23E504b2Bdd6bD1150a5d3C630436
-```
-
-Fresh browser-test escrow instance created through the live dApp:
-
-```text
-0x9d829aF09870Fc4597983E4b0e6AFBBB0ce9B396
-```
-
-ProofEscrow deploys a new contract instance for each job, so the end-to-end test instance
-is intentionally different from the reference/default submission deployment.
-
-```text
-PASS  Wallet connection is no longer blocked by the GenLayer Snap error
-PASS  Fresh escrow created with two accessible MetaMask wallets
-PASS  Client funded the fresh escrow with 1 GEN
-PASS  Worker submitted public evidence
-PASS  Consensus snapshot committed -> SNAPSHOT_COMMITTED
-PASS  Adjudication -> ACCEPTED
-PASS  Accounting after ACCEPTED: pool 1 GEN / reserved 1 GEN / pending payout 1 GEN
-PASS  Worker withdrew 1 GEN
-PASS  Final state: Settled / pool 0 GEN / reserved 0 GEN / pending payout 0 GEN
-```
-
-Verified happy-path lifecycle:
-
-```text
-Create Job
--> Fund
--> Submit Deliverable
--> Build Consensus Snapshot
--> Adjudicate Deliverable (ACCEPTED)
--> Withdraw 1 GEN
--> Settled
-```
-
-The rejected/refund branch was not re-run in this browser verification and remains listed above as not yet re-verified.
-
-No contract change was made in this round.
+Only mark a runtime row PASS after observing the accepted on-chain state or intended rollback. Do not infer a timeout PASS from source code alone.

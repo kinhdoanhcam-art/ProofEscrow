@@ -16,9 +16,15 @@ export type JobSummary = {
   evidence_url: string
   attempt_count: string
   max_attempts: string
+  created_at: string
+  submission_deadline_unix: string
+  adjudication_deadline_unix: string
   submitted_at: string
   snapshot_committed_at: string
   resolved_at: string
+  resolution_reason: string
+  client_close_approved: boolean
+  worker_close_approved: boolean
 }
 
 export type Financials = {
@@ -317,6 +323,8 @@ export async function deployEscrow(params: {
   worker: Address
   rewardWei: bigint
   maxAttempts: number
+  submissionDeadlineUnix: bigint
+  adjudicationDeadlineUnix: bigint
   onHash?: (hash: Address) => void
   onStage?: (stage: 'submitting' | 'waiting' | 'confirmed') => void
 }): Promise<{ address: Address; hash: Address }> {
@@ -335,6 +343,8 @@ export async function deployEscrow(params: {
       params.worker,
       params.rewardWei,
       BigInt(params.maxAttempts),
+      params.submissionDeadlineUnix,
+      params.adjudicationDeadlineUnix,
     ],
   })) as Address
 

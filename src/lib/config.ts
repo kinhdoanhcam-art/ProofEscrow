@@ -4,6 +4,6 @@ export const EXPLORER_BASE =
 
 export const DEFAULT_CONTRACT_ADDRESS =
   (import.meta.env.VITE_DEFAULT_CONTRACT_ADDRESS ||
-    '0xdD4ecd08d0F23E504b2Bdd6bD1150a5d3C630436') as `0x${string}` | ''
+    '0x3ADEDD82008Fd54a0eB9DAA9477743B2b8851008') as `0x${string}` | ''
 
 export const LAST_CONTRACT_KEY = 'proofEscrow:lastContract'

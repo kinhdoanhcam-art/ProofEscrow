@@ -1,224 +1,248 @@
-# ProofEscrow
+# ProofEscrow V2
 
-**AI-adjudicated work escrow with deterministic native GEN settlement on GenLayer.**
+**Deadline-safe, AI-adjudicated work escrow on GenLayer.**
 
-ProofEscrow is a full-stack GenLayer dApp that connects qualitative deliverable review with deterministic escrow settlement. A Client defines a natural-language specification, Worker address, reward, and maximum attempts. The Client funds the escrow in native GEN. The Worker submits public evidence, GenLayer validators build a consensus-reviewed factual snapshot, and a separate adjudication stage determines whether the work satisfies the locked specification.
+ProofEscrow connects qualitative AI-validator review to deterministic native GEN settlement. Each job is its own contract instance. The Client locks a natural-language acceptance specification, Worker, reward, maximum attempts, **submission deadline**, and **adjudication deadline**. The Worker submits public evidence, validators commit a factual snapshot, and a separate adjudication stage judges that snapshot against the immutable specification.
 
-## Why GenLayer?
+V2 directly addresses the steward request that funded GEN must not remain locked when the workflow stalls.
 
-The difficult question is subjective:
+## V2 stall-protection model
 
-> Does the submitted evidence actually demonstrate that the Worker satisfied every material requirement?
+### 1. Explicit submission deadline
 
-GenLayer provides decentralized AI-validator consensus for that qualitative step, while ProofEscrow keeps funding, authorization, accounting, retries, withdrawal, refund, and state transitions deterministic.
+The constructor stores `submission_deadline_unix` on-chain. The Client cannot fund after it has passed. A first Worker submission must arrive before it.
 
-## State Machine
+If the escrow is still `FUNDED` when the deadline passes, either the Client or Worker may call:
+
+```text
+cancel_after_deadline()
+```
+
+The full pooled GEN is returned only to the Client and the terminal status becomes:
+
+```text
+CANCELLED_TIMEOUT
+```
+
+### 2. Explicit adjudication deadline
+
+The constructor also stores `adjudication_deadline_unix`, which must be later than the submission deadline.
+
+Snapshot creation, adjudication, and rejected-work resubmission cannot continue after this final deadline. If funds are still pooled in `SUBMITTED`, `SNAPSHOT_COMMITTED`, or `REJECTED`, either party may trigger the same timeout cancellation path.
+
+### 3. Mutual close
+
+Before a timeout, Client and Worker can each call:
+
+```text
+approve_mutual_close()
+```
+
+The approvals are stored on-chain. Only when **both** parties have approved does the escrow close and return the pooled GEN to the Client:
+
+```text
+MUTUALLY_CLOSED
+```
+
+Progressing the workflow clears stale mutual-close approvals so consent applies to the current workflow state.
+
+### 4. Accepted payout cannot depend on the Worker returning
+
+Once adjudication reaches `ACCEPTED_RESERVED`, the recipient and amount are already fixed. V2 therefore adds:
+
+```text
+release_reserved_payout()
+```
+
+Anyone may call it, but the payout can only be transferred to the immutable Worker address. This prevents an already-earned payout from remaining stranded if the Worker does not manually call `withdraw()`.
+
+## Lifecycle
 
 ```text
 OPEN
-  ↓ fund()
+  ↓ fund() before submission deadline
 FUNDED
-  ↓ submit_deliverable()
+  ↓ submit_deliverable() before submission deadline
 SUBMITTED
-  ↓ commit_reviewed_snapshot()
+  ↓ commit_reviewed_snapshot() before adjudication deadline
 SNAPSHOT_COMMITTED
-  ↓ adjudicate()
+  ↓ adjudicate() before adjudication deadline
 
-        ┌─────────────────────┐
-        ▼                     ▼
-ACCEPTED_RESERVED          REJECTED
-        │                     │
-        │ withdraw()          ├─ resubmit if attempts remain
-        ▼                     └─ refund()
-      PAID                       ↓
-                              REFUNDED
+        ┌─────────────────────────┐
+        ▼                         ▼
+ACCEPTED_RESERVED               REJECTED
+        │                         ├─ resubmit before final deadline
+        │ withdraw()              └─ refund()
+        │ or release_reserved_payout()
+        ▼
+       PAID
+
+FUNDED -- submission deadline --> CANCELLED_TIMEOUT
+SUBMITTED / SNAPSHOT_COMMITTED -- adjudication deadline --> CANCELLED_TIMEOUT
+FUNDED / SUBMITTED / SNAPSHOT_COMMITTED / REJECTED -- 2-of-2 mutual close --> MUTUALLY_CLOSED
 ```
 
-## Two-Stage AI Review
+## Two-stage AI review
 
-### Stage 1 — Consensus-Reviewed Snapshot
+**Stage 1 — reviewed snapshot.** Validators inspect the submitted public evidence and commit a concise factual snapshot containing observable facts and material limitations. This stage does not decide acceptance.
 
-Validators inspect Worker evidence and produce a factual snapshot containing fetch status, exact source URL, summary, observable facts, and limitations. The snapshot records evidence; it does not make the final verdict.
+**Stage 2 — adjudication.** Validators judge only the immutable specification against the committed snapshot. Missing or unverifiable material requirements fail closed to `REJECTED`.
 
-### Stage 2 — Adjudication
+## Deterministic accounting
 
-Final adjudication uses only:
+ProofEscrow deterministically enforces:
+
+- immutable Client and Worker addresses;
+- immutable acceptance specification + SHA-256 hash;
+- exact native GEN reward funding;
+- bounded submission attempts;
+- explicit timeout cutoffs;
+- Client-only refund destination;
+- Worker-only accepted payout destination;
+- pool / reserved / pending-payout accounting;
+- terminal settlement states.
+
+## V2 contract surface
+
+New or materially changed methods:
 
 ```text
-Locked Specification
-+
-Committed Reviewed Snapshot
+constructor(
+  title,
+  specification,
+  worker,
+  reward_wei,
+  max_attempts,
+  submission_deadline_unix,
+  adjudication_deadline_unix
+)
+
+approve_mutual_close()
+cancel_after_deadline()
+release_reserved_payout()
+get_deadlines()
+get_close_state()
+get_config()
 ```
 
-The evidence URL is not fetched again during final judgment. The result becomes `ACCEPTED` or `REJECTED` with rationale and failed requirements.
+`get_job_summary()` also exposes both deadlines, mutual-close approvals, and terminal resolution reason.
 
-## Deterministic Escrow Logic
+## UI / UX redesign
 
-ProofEscrow deterministically enforces Client/Worker identities, immutable specification, exact reward amount, Client-only funding, Worker-only evidence submission, bounded attempts, pool/reserved/pending accounting, Worker withdrawal, Client refund, and one-way settlement states.
-
-## Accepted Settlement
+The V2 frontend is split into dedicated hash-routed pages:
 
 ```text
-status          = ACCEPTED_RESERVED
-reserved        = reward
-pending_payout  = reward
+#/            Landing / product overview
+#/create      Escrow creation
+#/dashboard   Escrow dashboard
 ```
 
-The Worker calls `withdraw()`. After withdrawal:
+The redesign includes:
+
+- modern dark-mode surfaces and high-contrast status cards;
+- dedicated landing, creation, and dashboard experiences;
+- explicit date/time inputs for both deadlines;
+- live deadline state on the dashboard;
+- stall-protection panel for timeout cancellation and 2-of-2 mutual close;
+- compact address truncation with copy controls;
+- responsive desktop/tablet/mobile layouts;
+- role-aware disabled actions with explanations;
+- resilient wallet/RPC handling retained from the previous steward fix;
+- locally remembered recent escrow addresses for navigation only; authoritative state is always read from the contract.
+
+## Verified V2 StudioNet runtime
+
+The V2 source in this repository was exercised on fresh StudioNet deployments with the same contract SHA-256 shown below. The runtime matrix covered the steward-requested stall and settlement paths:
 
 ```text
-status          = PAID
-pool            = 0
-reserved        = 0
-pending_payout  = 0
+0xC09951A1a09BE682E72844CAf9AB9903E5921929
+  SUBMITTED -> adjudication deadline elapsed -> CANCELLED_TIMEOUT
+  resolution: Adjudication deadline elapsed before final settlement
+
+0xBf3F249487C63155f094D0e5348115dce06E8D73
+  FUNDED -> Client approval -> Worker approval -> MUTUALLY_CLOSED
+  resolution: Client and Worker mutually approved escrow closure
+
+0x67Be788c86Ef9f224C940434b413709B287Ec04C
+  negative adjudication case -> REJECTED when evidence wording did not satisfy the immutable specification
+
+0x3ADEDD82008Fd54a0eB9DAA9477743B2b8851008
+  normal settlement -> ACCEPTED_RESERVED -> permissionless release by Client -> PAID
+  reward: 1 GEN; final pool/reserved/pending payout: 0 / 0 / 0
 ```
 
-## Rejected Settlement
+The frontend defaults to the final paid V2 instance `0x3ADEDD82008Fd54a0eB9DAA9477743B2b8851008`. Other V2 evidence addresses can still be opened directly from the dashboard.
 
-```text
-status          = REJECTED
-pool            = reward
-reserved        = 0
-pending_payout  = 0
-```
+## Historical V1 deployments
 
-If attempts remain, the Worker may submit replacement evidence. The Client may call `refund()` from the rejected state.
-
-## RPC Reliability
-
-StudioNet can occasionally rate-limit or temporarily fail receipt requests. The frontend separates submission from receipt monitoring and uses bounded retry/backoff. Once a write returns a transaction hash, the UI does not automatically submit the same write again merely because receipt monitoring later fails.
-
-For deployment, the frontend waits for an `ACCEPTED` receipt so the new contract address can be recovered sooner. If receipt monitoring cannot recover the address, the transaction hash remains available with an Explorer/recovery path instead of automatically deploying again.
-
-## Steward Feedback Fix
-
-The Aug 2026 steward feedback reported:
-
-```text
-Creating a job shows this error [object Object]
-please work on your UI/UX
-```
-
-The frontend/docs update addresses that feedback without changing the deployed contract.
-
-Changes include:
-
-- plain-object wallet/RPC errors are normalized instead of rendering `[object Object]`;
-- raw provider errors are logged to the browser console for debugging;
-- deployment waits for `ACCEPTED` instead of requiring long `FINALIZED` monitoring before recovering the address;
-- submitted deployments preserve the transaction hash and expose recovery UI;
-- transaction progress is shown in stages;
-- create inputs mirror the contract's text limits and show live counters;
-- toasts are dismissible and long error content is scrollable;
-- recent escrows are stored locally;
-- the connected role is shown as `CLIENT`, `WORKER`, or `OBSERVER`;
-- role-restricted actions remain visible but disabled with an explanation.
-
-## Verified Frontend Re-Test
-
-The final steward-fix frontend was tested in the browser against StudioNet.
-
-Verified:
-
-```text
-PASS  npm run build
-PASS  Create Job with valid inputs
-PASS  Newly created escrow address loaded into the app
-PASS  Newly created escrow appeared in Recent Escrows
-PASS  MetaMask Reject produced a readable error instead of [object Object]
-PASS  Specification input capped at 2000 / 2000
-PASS  Error toast could be closed with ×
-PASS  WORKER role badge rendered for the Worker wallet
-PASS  Client-only Fund action stayed visible but disabled for Worker
-PASS  Disabled action displayed: "Only the client may fund."
-PASS  Wallet connection works without requiring the GenLayer Snap
-PASS  Fresh two-wallet escrow created and funded with 1 GEN
-PASS  Worker submitted a public evidence URL
-PASS  Consensus snapshot committed -> SNAPSHOT_COMMITTED
-PASS  Adjudication -> ACCEPTED
-PASS  Accounting after ACCEPTED: pool 1 GEN / reserved 1 GEN / pending payout 1 GEN
-PASS  Worker withdrew 1 GEN
-PASS  Final state -> Settled / pool 0 GEN / reserved 0 GEN / pending payout 0 GEN
-```
-
-Fresh browser-test escrow instance:
-
-```text
-0x9d829aF09870Fc4597983E4b0e6AFBBB0ce9B396
-```
-
-ProofEscrow deploys a new contract instance for each job. The address above is the fresh
-instance created through the live dApp for the end-to-end browser verification.
-
-Not claimed as browser-verified in this re-test:
-
-```text
-- manual recovery after an intentionally forced receipt-monitoring failure
-- informational toast auto-dismiss timing
-- long-error scrolling under an intentionally oversized RPC error
-- rejected/refund settlement branch
-```
-
-See [`TESTING.md`](./TESTING.md) for the exact observed test record.
-
-## Reference Deployment
+The previous submission referenced:
 
 ```text
 0xdD4ecd08d0F23E504b2Bdd6bD1150a5d3C630436
 ```
 
-This is the reference/default ProofEscrow deployment used in the submission documentation.
-Because the dApp deploys one ProofEscrow contract per job, the fresh browser-test instance
-recorded above has a different address.
+A previous browser-test instance was:
 
-Explorer:
+```text
+0x9d829aF09870Fc4597983E4b0e6AFBBB0ce9B396
+```
 
-https://explorer-studio.genlayer.com/address/0xdD4ecd08d0F23E504b2Bdd6bD1150a5d3C630436
+Those contracts use the old source and **must not be presented as V2 evidence**. V2 changes constructor arguments and settlement behavior.
 
-## Live App
+## Verification status
 
-https://proof-escrow-bay.vercel.app/
+Local/static gates currently completed:
 
-## GitHub
+```text
+PASS  Python syntax compilation for contracts/ProofEscrow.py
+PASS  V2 structural contract/UI checks (20/20)
+PASS  TypeScript syntax transpilation for App.tsx / genlayer.ts / config.ts
+```
 
-https://github.com/kinhdoanhcam-art/ProofEscrow
+The contract source SHA-256 for this package is:
 
-## Tech Stack
+```text
+73b87f672cee35e7a9d08328ddad7f89767bfbbb04fc9aa1be479e472c85dfa8
+```
 
-- GenLayer Intelligent Contracts
-- GenVM / Python
+Fresh StudioNet runtime verification is **PASS** for timeout cancellation, 2-of-2 mutual close, negative adjudication, accepted reservation, and permissionless payout release. The final Vercel production UI check is still pending. See [`TESTING.md`](./TESTING.md).
+
+## Commands
+
+```bash
+npm ci
+npm run test:v2
+npm run test:wallet
+npm run build
+```
+
+## Tech stack
+
+- GenLayer Intelligent Contracts / GenVM Python
 - GenLayer AI-validator consensus
-- genlayer-js
-- React
-- TypeScript
-- Vite
-- MetaMask
 - native GEN settlement
+- genlayer-js
+- React + TypeScript + Vite
+- MetaMask
 
-## Repository Structure
+## Repository structure
 
 ```text
 ProofEscrow/
-├── contracts/
-│   └── ProofEscrow.py
+├── contracts/ProofEscrow.py
+├── scripts/check-v2.mjs
 ├── src/
-│   ├── lib/
-│   │   ├── config.ts
-│   │   ├── errors.ts
-│   │   └── genlayer.ts
+│   ├── lib/config.ts
+│   ├── lib/errors.ts
+│   ├── lib/genlayer.ts
 │   ├── App.tsx
 │   ├── main.tsx
 │   └── styles.css
+├── tests/
+│   ├── build-test-bundle.mjs
+│   └── connect.test.mjs
 ├── README.md
 ├── TESTING.md
 ├── package.json
-├── package-lock.json
-├── tsconfig.app.json
-├── tsconfig.json
-├── vite.config.ts
-└── index.html
+└── ...
 ```
-
-## Status
-
-**Deployed on GenLayer StudioNet. Steward-feedback frontend fix re-tested and ready for resubmission.**
