@@ -14,6 +14,33 @@ import {
 import { DEFAULT_CONTRACT_ADDRESS, EXPLORER_BASE, LAST_CONTRACT_KEY } from './lib/config'
 import { normalizeError } from './lib/errors'
 
+/**
+ * Wallet and contract addresses are commonly pasted from Explorer or another
+ * web page with a trailing space, newline, non-breaking space, or invisible
+ * zero-width character. None of those characters can be part of a hex
+ * address, so remove them before validating and before sending the value.
+ */
+export const normalizeAddressInput = (value: string): string =>
+  value.replace(/[\s\u00a0\u200b-\u200d\ufeff]+/g, '')
+
+/**
+ * Prefer viem's checksum-aware validation. If a paste contains a valid
+ * 20-byte hex address with non-canonical casing, normalize it to lowercase.
+ * This is intentionally paste-tolerant; malformed length or non-hex input is
+ * still rejected.
+ */
+export const toAddress = (value: string): Address | null => {
+  const cleaned = normalizeAddressInput(value)
+  if (isAddress(cleaned)) return cleaned as Address
+
+  const lowered = cleaned.toLowerCase()
+  if (/^0x[0-9a-f]{40}$/.test(lowered) && isAddress(lowered)) {
+    return lowered as Address
+  }
+
+  return null
+}
+
 type Mode = 'landing' | 'create' | 'dashboard'
 
 const modeFromHash = (): Mode => {
@@ -254,9 +281,10 @@ export default function App() {
       if (restored) setAccount(restored)
 
       const saved = DEFAULT_CONTRACT_ADDRESS || localStorage.getItem(LAST_CONTRACT_KEY) || ''
-      if (saved && isAddress(saved)) {
-        setContractAddress(saved)
-        setLoadAddress(saved)
+      const savedAddress = toAddress(saved)
+      if (savedAddress) {
+        setContractAddress(savedAddress)
+        setLoadAddress(savedAddress)
       }
 
       try {
@@ -383,13 +411,14 @@ export default function App() {
   }
 
   async function handleLoad() {
-    if (!isAddress(loadAddress)) {
-      setError('Enter a valid GenLayer contract address.')
+    const target = toAddress(loadAddress)
+    if (!target) {
+      setError('Enter a valid 42-character GenLayer contract address starting with 0x.')
       return
     }
-    const target = loadAddress as Address
     setJob(null)
     setError('')
+    setLoadAddress(target)
     setContractAddress(target)
     localStorage.setItem(LAST_CONTRACT_KEY, target)
     navigate('dashboard')
@@ -406,7 +435,8 @@ export default function App() {
 
   async function handleCreate() {
     if (!account) return setError('Connect the Client wallet first.')
-    if (!isAddress(worker)) return setError('Worker address is invalid.')
+    const cleanWorker = toAddress(worker)
+    if (!cleanWorker) return setError('Worker address is invalid. Paste a 42-character address starting with 0x.')
 
     const cleanTitle = title.trim()
     const cleanSpecification = specification.trim()
@@ -445,7 +475,7 @@ export default function App() {
         account,
         title: cleanTitle,
         specification: cleanSpecification,
-        worker: worker as Address,
+        worker: cleanWorker,
         rewardWei,
         maxAttempts: attempts,
         submissionDeadlineUnix: BigInt(submissionDeadlineUnix),
@@ -465,10 +495,11 @@ export default function App() {
   }
 
   async function handleRecoverAddress() {
-    if (!isAddress(recoveryAddress)) return setError('Paste a valid deployed contract address from Explorer.')
-    const target = recoveryAddress as Address
+    const target = toAddress(recoveryAddress)
+    if (!target) return setError('Paste a valid 42-character deployed contract address from Explorer.')
     setContractAddress(target)
     setLoadAddress(target)
+    setRecoveryAddress(target)
     localStorage.setItem(LAST_CONTRACT_KEY, target)
     saveRecentJob({ address: target, title: title.trim() || 'Recovered escrow', status: 'SYNCING' })
     setDeployStage('confirmed')
