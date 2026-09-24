@@ -16,8 +16,7 @@ Run:
 
 ```bash
 python -m py_compile contracts/ProofEscrow.py
-npm run test:v2
-npm run test:wallet
+npm test
 npm run build
 ```
 
@@ -25,11 +24,54 @@ Observed in the package-preparation environment:
 
 ```text
 PASS  python -m py_compile contracts/ProofEscrow.py
-PASS  npm run test:v2 — 20 checks, 0 failed
-PASS  TypeScript syntax transpilation for App.tsx, genlayer.ts, config.ts
+PASS  npm run test:address — 17 functional cases, 0 failed
+PASS  four pasted-address paths use the shared parser
+PASS  npm run test:v2 — 24 checks, 0 failed
+PASS  npm run test:wallet — 15 checks, 0 failed
+PASS  npm run build — TypeScript and Vite production build
 ```
 
-A production build should be re-run in the final dependency-installed checkout before Vercel deployment. Runtime contract verification below is independent of that frontend build gate.
+Runtime contract verification below is independent of the frontend build gate.
+
+## Worker-address regression requested by the steward
+
+The frontend previously passed raw pasted text directly to viem's
+`isAddress()`. A valid address copied with a trailing space, newline, NBSP, or
+zero-width character was rejected before a deployment transaction could be
+built.
+
+The frontend now removes characters that cannot be part of a hex address and
+uses the same normalized value for both validation and the subsequent
+operation. The shared parser covers Worker creation, Open escrow, deployment
+recovery, and local-storage restoration.
+
+Automated functional matrix:
+
+| Input | Expected | Observed |
+| --- | --- | --- |
+| checksummed address | accepted unchanged | PASS |
+| lowercase address | accepted unchanged | PASS |
+| all-uppercase address | accepted as lowercase | PASS |
+| leading/trailing space | accepted after normalization | PASS |
+| newline or tab | accepted after normalization | PASS |
+| U+00A0 NBSP | accepted after normalization | PASS |
+| U+200B/U+200C/U+200D zero-width characters | accepted after normalization | PASS |
+| U+FEFF byte-order mark | accepted after normalization | PASS |
+| embedded whitespace | accepted after normalization | PASS |
+| `0x123` | rejected | PASS |
+| non-hex, missing-prefix, or empty input | rejected | PASS |
+
+Run only this regression gate with:
+
+```bash
+npm run test:address
+```
+
+The contract source remains byte-for-byte unchanged at SHA-256
+`73b87f672cee35e7a9d08328ddad7f89767bfbbb04fc9aa1be479e472c85dfa8`.
+No redeployment is required. Authenticated manual verification on the public
+Vercel deployment must be completed after this frontend commit is deployed;
+it is not claimed by the local automated run.
 
 ## Steward request coverage
 
@@ -266,6 +308,7 @@ After the V2 source is deployed and its new address is configured in the fronten
 - `#/dashboard` loads a V2 address without showing V1 state.
 - stale `VITE_DEFAULT_CONTRACT_ADDRESS` values matching either historical V1 deployment are rejected and the final paid V2 address is used instead.
 - Client and Worker addresses are truncated and copyable.
+- pasted Worker, Open escrow, and recovery addresses accept whitespace/NBSP/zero-width artifacts while malformed `0x123` remains rejected.
 - deadline cards show absolute time plus workflow-aware state: active overdue gates are red, completed/resolved milestones are not falsely marked expired after settlement.
 - timeout cancellation is disabled before the relevant cutoff.
 - mutual-close approvals visibly reflect on-chain Client/Worker flags.

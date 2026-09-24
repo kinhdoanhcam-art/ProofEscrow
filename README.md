@@ -150,6 +150,29 @@ The redesign includes:
 - resilient wallet/RPC handling retained from the previous steward fix;
 - locally remembered recent escrow addresses for navigation only; authoritative state is always read from the contract.
 
+### Paste-safe address handling
+
+Every user-pasted address now goes through one shared parser before validation
+and before it is used. The parser removes ordinary whitespace, non-breaking
+spaces, byte-order marks, and zero-width characters that commonly accompany an
+address copied from Explorer or another web page.
+
+The same parser is used for:
+
+- the Worker wallet supplied during escrow creation;
+- the contract address entered in **Open escrow**;
+- the contract address entered in the post-deploy recovery flow; and
+- the last contract address restored from local storage.
+
+ProofEscrow intentionally uses paste-tolerant casing. A valid 20-byte hex
+address with non-canonical or all-uppercase casing is normalized to lowercase.
+Wrong length, missing `0x`, and non-hex input remain invalid. The exact
+normalized value that passes validation is also the value sent or stored; raw
+input is never validated and then forwarded separately.
+
+This is a frontend-only correction. `contracts/ProofEscrow.py` and the deployed
+contract remain unchanged.
+
 ## Verified V2 StudioNet runtime
 
 The V2 source in this repository was exercised on fresh StudioNet deployments with the same contract SHA-256 shown below. The runtime matrix covered the steward-requested stall and settlement paths:
@@ -196,7 +219,9 @@ Local/static gates currently completed:
 ```text
 PASS  Python syntax compilation for contracts/ProofEscrow.py
 PASS  V2 structural contract/UI checks (24/24)
-PASS  TypeScript syntax transpilation for App.tsx / genlayer.ts / config.ts
+PASS  pasted-address regression checks (17/17 plus four-path source assertions)
+PASS  wallet connection regression checks (15/15)
+PASS  TypeScript production build
 ```
 
 The contract source SHA-256 for this package is:
@@ -211,8 +236,7 @@ Fresh StudioNet runtime verification is **PASS** for timeout cancellation, 2-of-
 
 ```bash
 npm ci
-npm run test:v2
-npm run test:wallet
+npm test
 npm run build
 ```
 
@@ -230,6 +254,7 @@ npm run build
 ```text
 ProofEscrow/
 ├── contracts/ProofEscrow.py
+├── scripts/check-address-input.mjs
 ├── scripts/check-v2.mjs
 ├── src/
 │   ├── lib/config.ts
